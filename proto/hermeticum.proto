@@ -1,0 +1,75 @@
+syntax = "proto3";
+
+option go_package = "github.com/vilmibm/hermeticum/proto";
+
+package proto;
+
+/*
+
+In the existing code, there are a few classes of messages that get sent to the user:
+
+- ACK of a meta operation (login, register, ping)
+- ACK of a command (this is kind of useless, imo)
+- Refresh to an object's state (used when editing objects)
+- Refresh to the room state
+- Message to print
+
+these are mostly recreated below with the TODO of deciding on revision/object stuff (which I wasn't thrilled with in the alpha)
+
+*/
+
+service GameWorld {
+  rpc Register(AuthInfo) returns (SessionInfo);
+  rpc Login(AuthInfo) returns (SessionInfo);
+  rpc Commands(stream Command) returns (stream CommandAck);
+  rpc State(SessionInfo) returns (stream StateUpdate);
+  rpc Messages(SessionInfo) returns (stream ClientMessage);
+  rpc Map(SessionInfo) returns (MapData);
+  rpc Ping(SessionInfo) returns (Pong);
+  // TODO decide on how revisions / object editing in general should work
+}
+
+message AuthInfo {
+  string username = 1;
+  string password = 2;
+}
+
+message SessionInfo {
+  string sessionID = 1;
+}
+
+message StateUpdate {
+  // TODO
+}
+
+message Command {
+  string sessionInfo = 1;
+  string verb = 2;
+  string rest = 3;
+}
+
+message CommandAck {
+    bool acked = 1;
+    string errorMsg = 2;
+}
+
+message ClientMessage {
+  enum ClientMessageType {
+    WHISPER = 0;   // someone or something sent a private message to user
+    OVERHEARD = 1; // someone or something in the same room said something out loud
+    EMOTE = 2;     // someone or something in the same room performed an action
+    GENERIC = 3;   // just a string that should be printed (ie, "you hear noises in a nearby room")
+    GLOBAL = 4;    // the system sent out a PSA
+  }
+
+  ClientMessageType cmt = 1;
+  optional string speaker = 2;
+}
+
+message MapData {
+  string mapData = 1;
+}
+
+message Pong {
+  string when = 1; // timestamp of pong creation
+}
