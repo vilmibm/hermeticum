@@ -79,6 +79,7 @@ func (s *gameWorldServer) Register(ctx context.Context, auth *proto.AuthInfo) (*
 func main() {
 	err := _main()
 	if err != nil {
+		log.Fatal(err.Error())
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
 	}
