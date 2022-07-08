@@ -8,6 +8,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/rivo/tview"
 	"github.com/vilmibm/hermeticum/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -56,7 +57,31 @@ func _main() error {
 
 	log.Printf("%#v", pong)
 
-	return nil
+	app := tview.NewApplication()
+	pages := tview.NewPages()
+
+	pages.AddPage("splash",
+		tview.NewModal().
+			AddButtons([]string{"hey. let's go"}).
+			SetDoneFunc(func(_ int, _ string) {
+				pages.SwitchToPage("main")
+			}).SetText("h e r m e t i c u m"),
+		false,
+		true)
+
+	mainPage := tview.NewList().
+		AddItem("jack in", "connect using an existing account", '1', nil).
+		AddItem("rez a toon", "create a new account", '2', nil).
+		AddItem("open the hood", "client configuration", '3', nil).
+		AddItem("get outta here", "quit the client", '4', func() {
+			app.Stop()
+		})
+
+	mainPage.SetRect(0, 0, 100, 100)
+
+	pages.AddPage("main", mainPage, false, false)
+
+	return app.SetRoot(pages, true).SetFocus(pages).Run()
 }
 
 func main() {
