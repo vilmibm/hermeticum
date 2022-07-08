@@ -1,3 +1,4 @@
+*.pb.go
 *.swp
 # Binaries for programs and plugins
 *.exe
