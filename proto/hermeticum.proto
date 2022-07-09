@@ -62,8 +62,9 @@ message ClientMessage {
     GLOBAL = 4;    // the system sent out a PSA
   }
 
-  ClientMessageType cmt = 1;
+  ClientMessageType type = 1;
   optional string speaker = 2;
+  string text = 3;
 }
 
 message MapData {

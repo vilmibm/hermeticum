@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"time"
 
 	"github.com/vilmibm/hermeticum/proto"
 	"google.golang.org/grpc"
@@ -66,6 +67,19 @@ func (s *gameWorldServer) Ping(ctx context.Context, _ *proto.SessionInfo) (*prot
 	}
 
 	return pong, nil
+}
+
+func (s *gameWorldServer) Messages(si *proto.SessionInfo, stream proto.GameWorld_MessagesServer) error {
+	for x := 0; x < 20; x++ {
+		msg := &proto.ClientMessage{}
+		speaker := "snoozy"
+		msg.Speaker = &speaker
+		msg.Type = proto.ClientMessage_WHISPER
+		msg.Text = fmt.Sprintf("have message %d", x)
+		stream.Send(msg)
+		time.Sleep(2 * time.Second)
+	}
+	return nil
 }
 
 func (s *gameWorldServer) Register(ctx context.Context, auth *proto.AuthInfo) (*proto.SessionInfo, error) {
