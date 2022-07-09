@@ -23,7 +23,7 @@ var (
 )
 
 func messages(cs *ClientState) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stream, err := cs.Client.Messages(ctx, cs.SessionInfo)
 	if err != nil {
@@ -60,12 +60,11 @@ func (cs *ClientState) AddMessage(msg *proto.ClientMessage) {
 		cs.messages = cs.messages[1 : len(cs.messages)-1]
 	}
 
+	// TODO look into using the SetChangedFunc thing.
 	cs.App.QueueUpdateDraw(func() {
-		cs.messagesView.SetText("")
-
-		for _, msg := range cs.messages {
-			fmt.Fprintf(cs.messagesView, "%#v\n", msg)
-		}
+		// TODO trim content of messagesView /or/ see if tview has a buffer size that does it for me. use cs.messages to re-constitute.
+		fmt.Fprintf(cs.messagesView, "%s: %s\n", msg.GetSpeaker(), msg.GetText())
+		cs.messagesView.ScrollToEnd()
 	})
 }
 
@@ -116,8 +115,6 @@ func _main() error {
 		log.Fatalf("%v.Ping -> %v", cs.Client, err)
 	}
 
-	//stream, err := messageStream(client, sessionInfo)
-
 	log.Printf("%#v", pong)
 
 	pages := tview.NewPages()
@@ -144,7 +141,7 @@ func _main() error {
 
 	pages.AddPage("main", mainPage, true, false)
 
-	msgView := tview.NewTextView()
+	msgView := tview.NewTextView().SetScrollable(true).SetWrap(true).SetWordWrap(true)
 	cs.messagesView = msgView
 
 	gamePage := tview.NewGrid().

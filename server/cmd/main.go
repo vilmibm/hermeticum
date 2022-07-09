@@ -70,14 +70,14 @@ func (s *gameWorldServer) Ping(ctx context.Context, _ *proto.SessionInfo) (*prot
 }
 
 func (s *gameWorldServer) Messages(si *proto.SessionInfo, stream proto.GameWorld_MessagesServer) error {
-	for x := 0; x < 20; x++ {
+	for x := 0; x < 100; x++ {
 		msg := &proto.ClientMessage{}
 		speaker := "snoozy"
 		msg.Speaker = &speaker
 		msg.Type = proto.ClientMessage_WHISPER
-		msg.Text = fmt.Sprintf("have message %d", x)
+		msg.Text = fmt.Sprintf("hi this is message %d. by the way i am a horse. neigh neigh neigh neigh neigh neigh neigh neigh neigh neigh neigh neigh", x)
 		stream.Send(msg)
-		time.Sleep(2 * time.Second)
+		time.Sleep(500 * time.Millisecond)
 	}
 	return nil
 }
