@@ -83,6 +83,7 @@ func (s *gameWorldServer) Messages(si *proto.SessionInfo, stream proto.GameWorld
 }
 
 func (s *gameWorldServer) Register(ctx context.Context, auth *proto.AuthInfo) (*proto.SessionInfo, error) {
+	log.Printf("COOL HI HELLO %s %s", auth.Username, auth.Password)
 	// TODO
 	return nil, nil
 }

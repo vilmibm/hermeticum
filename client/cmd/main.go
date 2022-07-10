@@ -133,13 +133,38 @@ func _main() error {
 		AddItem("jack in", "connect using an existing account", '1', func() {
 			pages.SwitchToPage("game")
 		}).
-		AddItem("rez a toon", "create a new account", '2', nil).
+		AddItem("rez a toon", "create a new account", '2', func() {
+			pages.SwitchToPage("register")
+		}).
 		AddItem("open the hood", "client configuration", '3', nil).
 		AddItem("get outta here", "quit the client", '4', func() {
 			app.Stop()
 		})
 
 	pages.AddPage("main", mainPage, true, false)
+
+	unfi := tview.NewInputField().SetLabel("account name")
+	pwfi := tview.NewInputField().SetLabel("password").SetMaskCharacter('~')
+
+	registerPage := tview.NewForm().AddFormItem(unfi).AddFormItem(pwfi).
+		SetCancelFunc(func() {
+			pages.SwitchToPage("main")
+		})
+
+	submitFunc := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		cs.Client.Register(ctx, &proto.AuthInfo{
+			Username: unfi.GetText(),
+			Password: pwfi.GetText(),
+		})
+	}
+
+	registerPage.AddButton("gimme that shit", submitFunc)
+	registerPage.AddButton("nah get outta here", func() {
+		pages.SwitchToPage("main")
+	})
+	pages.AddPage("register", registerPage, true, false)
 
 	msgView := tview.NewTextView().SetScrollable(true).SetWrap(true).SetWordWrap(true)
 	cs.messagesView = msgView
