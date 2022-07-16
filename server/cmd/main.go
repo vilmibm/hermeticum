@@ -84,13 +84,14 @@ func (s *gameWorldServer) Messages(si *proto.SessionInfo, stream proto.GameWorld
 }
 
 func (s *gameWorldServer) Register(ctx context.Context, auth *proto.AuthInfo) (si *proto.SessionInfo, err error) {
-	err = db.CreateAccount(auth.Username, auth.Password)
+	var a *db.Account
+	a, err = db.CreateAccount(auth.Username, auth.Password)
 	if err != nil {
 		return nil, err
 	}
 
 	var sessionID string
-	sessionID, err = db.StartSession(auth.Username)
+	sessionID, err = db.StartSession(*a)
 	if err != nil {
 		return nil, err
 	}
@@ -101,15 +102,17 @@ func (s *gameWorldServer) Register(ctx context.Context, auth *proto.AuthInfo) (s
 }
 
 func (s *gameWorldServer) Login(ctx context.Context, auth *proto.AuthInfo) (si *proto.SessionInfo, err error) {
-	err = db.ValidateCredentials(auth.Username, auth.Password)
+	fmt.Printf("DBG %#v\n", "HI")
+	var a *db.Account
+	a, err = db.ValidateCredentials(auth.Username, auth.Password)
 	if err != nil {
 		return
 	}
 
 	var sessionID string
-	sessionID, err = db.StartSession(auth.Username)
+	sessionID, err = db.StartSession(*a)
 	if err != nil {
-		return nil, err
+		return
 	}
 
 	si = &proto.SessionInfo{SessionID: sessionID}

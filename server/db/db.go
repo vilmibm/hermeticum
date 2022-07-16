@@ -26,37 +26,49 @@ func connect() (*pgxpool.Pool, error) {
 	return conn, nil
 }
 
-func CreateAccount(name, password string) error {
+func CreateAccount(name, password string) (*Account, error) {
 	conn, err := connect()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	_, err = conn.Exec(context.Background(), "INSERT INTO accounts VALUES ( ?, ? )", name, password)
+	_, err = conn.Exec(context.Background(),
+		"INSERT INTO accounts (name, pwhash) VALUES ( $1, $2 )", name, password)
+	if err != nil {
+		return nil, err
+	}
+
+	row := conn.QueryRow(context.Background(), "SELECT id,name,pwhash FROM accounts WHERE name = $1")
+	a := &Account{}
+	err = row.Scan(&a.ID, &a.Name, &a.Pwhash)
+	if err != nil {
+		return nil, err
+	}
 
 	// TODO handle and cleanup unqiue violations
 
-	return err
+	return a, err
 }
 
-func ValidateCredentials(name, password string) error {
+func ValidateCredentials(name, password string) (*Account, error) {
 	a, err := GetAccount(name)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// TODO hashing lol
 
-	if a.Password != password {
-		return errors.New("invalid credentials")
+	if a.Pwhash != password {
+		return nil, errors.New("invalid credentials")
 	}
 
-	return nil
+	return a, nil
 }
 
 type Account struct {
-	Name     string
-	Password string
+	ID     int
+	Name   string
+	Pwhash string
 }
 
 func GetAccount(name string) (*Account, error) {
@@ -65,11 +77,11 @@ func GetAccount(name string) (*Account, error) {
 		return nil, err
 	}
 
-	row := conn.QueryRow(context.Background(), "SELECT name,password FROM accounts WHERE name = ?", name)
+	row := conn.QueryRow(context.Background(), "SELECT id, name, pwhash FROM accounts WHERE name = $1", name)
 
 	a := &Account{}
 
-	err = row.Scan(&a.Name, &a.Password)
+	err = row.Scan(&a.ID, &a.Name, &a.Pwhash)
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +89,7 @@ func GetAccount(name string) (*Account, error) {
 	return a, nil
 }
 
-func StartSession(name string) (sessionID string, err error) {
+func StartSession(a Account) (sessionID string, err error) {
 	var conn *pgxpool.Pool
 	conn, err = connect()
 	if err != nil {
@@ -86,7 +98,7 @@ func StartSession(name string) (sessionID string, err error) {
 
 	sessionID = uuid.New().String()
 
-	_, err = conn.Exec(context.Background(), "INSERT INTO sessions VALUES ( ?, ? )", name, sessionID)
+	_, err = conn.Exec(context.Background(), "INSERT INTO sessions (session_id, account) VALUES ( $1, $2 )", sessionID, a.ID)
 
 	return
 }

@@ -131,7 +131,7 @@ func _main() error {
 
 	mainPage := tview.NewList().
 		AddItem("jack in", "connect using an existing account", '1', func() {
-			pages.SwitchToPage("game")
+			pages.SwitchToPage("login")
 		}).
 		AddItem("rez a toon", "create a new account", '2', func() {
 			pages.SwitchToPage("register")
@@ -143,30 +143,61 @@ func _main() error {
 
 	pages.AddPage("main", mainPage, true, false)
 
-	unfi := tview.NewInputField().SetLabel("account name")
-	pwfi := tview.NewInputField().SetLabel("password").SetMaskCharacter('~')
+	lunfi := tview.NewInputField().SetLabel("account name")
+	lpwfi := tview.NewInputField().SetLabel("password").SetMaskCharacter('~')
 
-	registerPage := tview.NewForm().AddFormItem(unfi).AddFormItem(pwfi).
+	loginPage := tview.NewForm().AddFormItem(lunfi).AddFormItem(lpwfi).
 		SetCancelFunc(func() {
 			pages.SwitchToPage("main")
 		})
 
-	submitFunc := func() {
+	loginSubmitFn := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		si, err := cs.Client.Register(ctx, &proto.AuthInfo{
-			Username: unfi.GetText(),
-			Password: pwfi.GetText(),
+		si, err := cs.Client.Login(ctx, &proto.AuthInfo{
+			Username: lunfi.GetText(),
+			Password: lpwfi.GetText(),
 		})
 		if err != nil {
 			panic(err.Error())
 		}
 
-		fmt.Printf("DBG %#v\n", si)
-		fmt.Printf("DBG %#v\n", err)
+		cs.SessionInfo = si
+
+		pages.SwitchToPage("game")
 	}
 
-	registerPage.AddButton("gimme that shit", submitFunc)
+	loginPage.AddButton("gimme that shit", loginSubmitFn)
+	loginPage.AddButton("nah get outta here", func() {
+		pages.SwitchToPage("main")
+	})
+	pages.AddPage("login", loginPage, true, false)
+
+	runfi := tview.NewInputField().SetLabel("account name")
+	rpwfi := tview.NewInputField().SetLabel("password").SetMaskCharacter('~')
+
+	registerPage := tview.NewForm().AddFormItem(runfi).AddFormItem(rpwfi).
+		SetCancelFunc(func() {
+			pages.SwitchToPage("main")
+		})
+
+	registerSubmitFn := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		si, err := cs.Client.Register(ctx, &proto.AuthInfo{
+			Username: runfi.GetText(),
+			Password: rpwfi.GetText(),
+		})
+		if err != nil {
+			panic(err.Error())
+		}
+
+		cs.SessionInfo = si
+
+		pages.SwitchToPage("game")
+	}
+
+	registerPage.AddButton("gimme that shit", registerSubmitFn)
 	registerPage.AddButton("nah get outta here", func() {
 		pages.SwitchToPage("main")
 	})
