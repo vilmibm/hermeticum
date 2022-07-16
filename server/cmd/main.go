@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/vilmibm/hermeticum/proto"
+	"github.com/vilmibm/hermeticum/server/db"
 	"google.golang.org/grpc"
 )
 
@@ -82,10 +83,38 @@ func (s *gameWorldServer) Messages(si *proto.SessionInfo, stream proto.GameWorld
 	return nil
 }
 
-func (s *gameWorldServer) Register(ctx context.Context, auth *proto.AuthInfo) (*proto.SessionInfo, error) {
-	log.Printf("COOL HI HELLO %s %s", auth.Username, auth.Password)
-	// TODO
-	return nil, nil
+func (s *gameWorldServer) Register(ctx context.Context, auth *proto.AuthInfo) (si *proto.SessionInfo, err error) {
+	err = db.CreateAccount(auth.Username, auth.Password)
+	if err != nil {
+		return nil, err
+	}
+
+	var sessionID string
+	sessionID, err = db.StartSession(auth.Username)
+	if err != nil {
+		return nil, err
+	}
+
+	si = &proto.SessionInfo{SessionID: sessionID}
+
+	return
+}
+
+func (s *gameWorldServer) Login(ctx context.Context, auth *proto.AuthInfo) (si *proto.SessionInfo, err error) {
+	err = db.ValidateCredentials(auth.Username, auth.Password)
+	if err != nil {
+		return
+	}
+
+	var sessionID string
+	sessionID, err = db.StartSession(auth.Username)
+	if err != nil {
+		return nil, err
+	}
+
+	si = &proto.SessionInfo{SessionID: sessionID}
+
+	return
 }
 
 // TODO other server functions

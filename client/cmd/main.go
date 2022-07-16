@@ -154,10 +154,16 @@ func _main() error {
 	submitFunc := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		cs.Client.Register(ctx, &proto.AuthInfo{
+		si, err := cs.Client.Register(ctx, &proto.AuthInfo{
 			Username: unfi.GetText(),
 			Password: pwfi.GetText(),
 		})
+		if err != nil {
+			panic(err.Error())
+		}
+
+		fmt.Printf("DBG %#v\n", si)
+		fmt.Printf("DBG %#v\n", err)
 	}
 
 	registerPage.AddButton("gimme that shit", submitFunc)
