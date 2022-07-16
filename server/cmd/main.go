@@ -102,7 +102,6 @@ func (s *gameWorldServer) Register(ctx context.Context, auth *proto.AuthInfo) (s
 }
 
 func (s *gameWorldServer) Login(ctx context.Context, auth *proto.AuthInfo) (si *proto.SessionInfo, err error) {
-	fmt.Printf("DBG %#v\n", "HI")
 	var a *db.Account
 	a, err = db.ValidateCredentials(auth.Username, auth.Password)
 	if err != nil {

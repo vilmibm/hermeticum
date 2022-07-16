@@ -38,7 +38,7 @@ func CreateAccount(name, password string) (*Account, error) {
 		return nil, err
 	}
 
-	row := conn.QueryRow(context.Background(), "SELECT id,name,pwhash FROM accounts WHERE name = $1")
+	row := conn.QueryRow(context.Background(), "SELECT id,name,pwhash FROM accounts WHERE name = $1", name)
 	a := &Account{}
 	err = row.Scan(&a.ID, &a.Name, &a.Pwhash)
 	if err != nil {
