@@ -24,7 +24,17 @@ var (
 	serverHostOverride = flag.String("server_host_override", "x.test.example.com", "The server name used to verify the hostname returned by the TLS handshake")
 )
 
-func messages(cs *ClientState) error {
+type ClientState struct {
+	App          *tview.Application
+	Client       proto.GameWorldClient
+	SessionInfo  *proto.SessionInfo
+	MaxMessages  int
+	messagesView *tview.TextView
+	messages     []*proto.ClientMessage
+	cmdStream    proto.GameWorld_CommandsClient
+}
+
+func (cs *ClientState) Messages() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stream, err := cs.Client.Messages(ctx, cs.SessionInfo)
@@ -44,16 +54,6 @@ func messages(cs *ClientState) error {
 	}
 
 	return nil
-}
-
-type ClientState struct {
-	App          *tview.Application
-	Client       proto.GameWorldClient
-	SessionInfo  *proto.SessionInfo
-	MaxMessages  int
-	messagesView *tview.TextView
-	messages     []*proto.ClientMessage
-	cmdStream    proto.GameWorld_CommandsClient
 }
 
 func (cs *ClientState) HandleInput(input string) error {
@@ -213,6 +213,8 @@ func _main() error {
 
 		pages.SwitchToPage("game")
 		app.SetFocus(commandInput)
+		// TODO error handle
+		go cs.Messages()
 	}
 
 	// TODO login and register pages should refuse blank entries
@@ -277,8 +279,6 @@ func _main() error {
 			2, 0, 1, 2, 1, 30, false)
 
 	pages.AddPage("game", gamePage, true, false)
-
-	go messages(cs)
 
 	return app.SetRoot(pages, true).SetFocus(pages).Run()
 }

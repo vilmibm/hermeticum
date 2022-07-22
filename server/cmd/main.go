@@ -7,7 +7,7 @@ import (
 	"io"
 	"log"
 	"net"
-	"time"
+	"sync"
 
 	"github.com/vilmibm/hermeticum/proto"
 	"github.com/vilmibm/hermeticum/server/db"
@@ -56,10 +56,15 @@ func _main() (err error) {
 
 type gameWorldServer struct {
 	proto.UnimplementedGameWorldServer
+
+	mu        sync.Mutex // for msgRouter
+	msgRouter map[string]func(*proto.ClientMessage) error
 }
 
 func newServer() *gameWorldServer {
-	s := &gameWorldServer{}
+	s := &gameWorldServer{
+		msgRouter: make(map[string]func(*proto.ClientMessage) error),
+	}
 	return s
 }
 
@@ -73,15 +78,28 @@ func (s *gameWorldServer) Commands(stream proto.GameWorld_CommandsServer) error 
 		if err != nil {
 			return err
 		}
-		fmt.Printf("DBG %#v\n", cmd)
 
-		// TODO FOR NOW, just find the session's associated message stream and do an echo (which requires doing a session storage solution first)
+		sid := cmd.SessionInfo.SessionID
+		send := s.msgRouter[sid]
+
+		msg := &proto.ClientMessage{
+			Type: proto.ClientMessage_OVERHEARD,
+			Text: fmt.Sprintf("%s sent command %s with args %s",
+				sid, cmd.Verb, cmd.Rest),
+		}
+
+		speaker := "ECHO"
+		msg.Speaker = &speaker
+
+		err = send(msg)
+		if err != nil {
+			log.Printf("failed to send %v to %s: %s", msg, sid, err)
+		}
 
 		// TODO find the user who ran action via SessionInfo
 		// TODO get area of effect, which should include the sender
 		// TODO dispatch the command to each affected object
 	}
-	return nil
 }
 
 func (s *gameWorldServer) Ping(ctx context.Context, _ *proto.SessionInfo) (*proto.Pong, error) {
@@ -93,16 +111,13 @@ func (s *gameWorldServer) Ping(ctx context.Context, _ *proto.SessionInfo) (*prot
 }
 
 func (s *gameWorldServer) Messages(si *proto.SessionInfo, stream proto.GameWorld_MessagesServer) error {
-	for x := 0; x < 100; x++ {
-		msg := &proto.ClientMessage{}
-		speaker := "snoozy"
-		msg.Speaker = &speaker
-		msg.Type = proto.ClientMessage_WHISPER
-		msg.Text = fmt.Sprintf("hi this is message %d. by the way i am a horse. neigh neigh neigh neigh neigh neigh neigh neigh neigh neigh neigh neigh", x)
-		stream.Send(msg)
-		time.Sleep(500 * time.Millisecond)
+	s.mu.Lock()
+	s.msgRouter[si.SessionID] = stream.Send
+	s.mu.Unlock()
+
+	// TODO this is clearly bad but it works. I should refactor this so that messages are received on a channel.
+	for {
 	}
-	return nil
 }
 
 func (s *gameWorldServer) Register(ctx context.Context, auth *proto.AuthInfo) (si *proto.SessionInfo, err error) {
