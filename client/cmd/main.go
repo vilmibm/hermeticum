@@ -167,6 +167,8 @@ func _main() error {
 		pages.SwitchToPage("game")
 	}
 
+	// TODO login and register pages should refuse blank entries
+	// TODO password should have rules
 	loginPage.AddButton("gimme that shit", loginSubmitFn)
 	loginPage.AddButton("nah get outta here", func() {
 		pages.SwitchToPage("main")
