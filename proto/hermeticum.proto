@@ -43,7 +43,7 @@ message StateUpdate {
 }
 
 message Command {
-  string sessionInfo = 1;
+  SessionInfo sessionInfo = 1;
   string verb = 2;
   string rest = 3;
 }

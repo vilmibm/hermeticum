@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"strings"
 	"time"
 
+	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/vilmibm/hermeticum/proto"
 	"google.golang.org/grpc"
@@ -51,6 +53,37 @@ type ClientState struct {
 	MaxMessages  int
 	messagesView *tview.TextView
 	messages     []*proto.ClientMessage
+	cmdStream    proto.GameWorld_CommandsClient
+}
+
+func (cs *ClientState) HandleInput(input string) error {
+	var verb string
+	rest := input
+	if strings.HasPrefix(input, "/") {
+		input = input[1:]
+		parts := strings.SplitN(input, " ", 1)
+		verb = parts[0]
+		rest = parts[1]
+	} else {
+		verb = "say"
+	}
+	cmd := &proto.Command{
+		SessionInfo: cs.SessionInfo,
+		Verb:        verb,
+		Rest:        rest,
+	}
+	// TODO I'm punting on handling CommandAcks for now but it will be a nice UX thing later for showing connectivity problems
+	return cs.cmdStream.Send(cmd)
+}
+
+func (cs *ClientState) InitCommandStream() error {
+	ctx := context.Background()
+	stream, err := cs.Client.Commands(ctx)
+	if err != nil {
+		return err
+	}
+	cs.cmdStream = stream
+	return nil
 }
 
 func (cs *ClientState) AddMessage(msg *proto.ClientMessage) {
@@ -107,6 +140,11 @@ func _main() error {
 		messages:    []*proto.ClientMessage{},
 	}
 
+	err = cs.InitCommandStream()
+	if err != nil {
+		return fmt.Errorf("could not create command stream: %w", err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -128,6 +166,15 @@ func _main() error {
 			}).SetText("h e r m e t i c u m"),
 		true,
 		true)
+
+	commandInput := tview.NewInputField().SetLabel("> ")
+	handleInput := func(_ tcell.Key) {
+		input := commandInput.GetText()
+		// TODO do i need to clear the input's text?
+		go cs.HandleInput(input)
+	}
+
+	commandInput.SetDoneFunc(handleInput)
 
 	mainPage := tview.NewList().
 		AddItem("jack in", "connect using an existing account", '1', func() {
@@ -165,6 +212,7 @@ func _main() error {
 		cs.SessionInfo = si
 
 		pages.SwitchToPage("game")
+		app.SetFocus(commandInput)
 	}
 
 	// TODO login and register pages should refuse blank entries
@@ -222,10 +270,10 @@ func _main() error {
 			msgView,
 			1, 0, 1, 1, 10, 20, false).
 		AddItem(
-			tview.NewTextView().SetText("TODO detail window"),
+			tview.NewTextView().SetText("TODO details"),
 			1, 1, 1, 1, 10, 10, false).
 		AddItem(
-			tview.NewTextView().SetText("TODO input"),
+			commandInput,
 			2, 0, 1, 2, 1, 30, false)
 
 	pages.AddPage("game", gamePage, true, false)

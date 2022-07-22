@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"time"
@@ -60,6 +61,27 @@ type gameWorldServer struct {
 func newServer() *gameWorldServer {
 	s := &gameWorldServer{}
 	return s
+}
+
+func (s *gameWorldServer) Commands(stream proto.GameWorld_CommandsServer) error {
+	for {
+		cmd, err := stream.Recv()
+		if err == io.EOF {
+			// TODO end session
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		fmt.Printf("DBG %#v\n", cmd)
+
+		// TODO FOR NOW, just find the session's associated message stream and do an echo (which requires doing a session storage solution first)
+
+		// TODO find the user who ran action via SessionInfo
+		// TODO get area of effect, which should include the sender
+		// TODO dispatch the command to each affected object
+	}
+	return nil
 }
 
 func (s *gameWorldServer) Ping(ctx context.Context, _ *proto.SessionInfo) (*proto.Pong, error) {

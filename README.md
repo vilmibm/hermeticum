@@ -34,3 +34,4 @@ wisdom. I like the idea of mapping these mental spaces into a computer.
 
 I haven't moved over any design docs or notes or anything like that. Refer to the tildemush repo for that kind of stuff.
 
+to regenerate the API code: `protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative proto/hermeticum.proto`
