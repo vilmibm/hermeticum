@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"log"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v4/pgxpool"
@@ -12,22 +13,39 @@ import (
 // go:embed schema.sql
 var schema string
 
-func EnsureSchema() {
-	// TODO look into tern
+type Account struct {
+	ID     int
+	Name   string
+	Pwhash string
 }
 
-func connect() (*pgxpool.Pool, error) {
-	// TODO read dburl from environment
-	conn, err := pgxpool.Connect(context.Background(), "postgres://vilmibm:vilmibm@localhost:5432/hermeticum")
+type DB interface {
+	// EnsureSchema() TODO look into tern
+	CreateAccount(string, string) (*Account, error)
+	ValidateCredentials(string, string) (*Account, error)
+	GetAccount(string) (*Account, error)
+	StartSession(Account) (string, error)
+	EndSession(string) error
+}
+
+type pgDB struct {
+	pool *pgxpool.Pool
+}
+
+func NewDB(connURL string) (DB, error) {
+	pool, err := pgxpool.Connect(context.Background(), connURL)
 	if err != nil {
 		return nil, err
 	}
+	pgdb := &pgDB{
+		pool: pool,
+	}
 
-	return conn, nil
+	return pgdb, nil
 }
 
-func CreateAccount(name, password string) (*Account, error) {
-	conn, err := connect()
+func (db *pgDB) CreateAccount(name, password string) (*Account, error) {
+	conn, err := db.pool.Acquire(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -50,8 +68,8 @@ func CreateAccount(name, password string) (*Account, error) {
 	return a, err
 }
 
-func ValidateCredentials(name, password string) (*Account, error) {
-	a, err := GetAccount(name)
+func (db *pgDB) ValidateCredentials(name, password string) (*Account, error) {
+	a, err := db.GetAccount(name)
 	if err != nil {
 		return nil, err
 	}
@@ -65,14 +83,8 @@ func ValidateCredentials(name, password string) (*Account, error) {
 	return a, nil
 }
 
-type Account struct {
-	ID     int
-	Name   string
-	Pwhash string
-}
-
-func GetAccount(name string) (*Account, error) {
-	conn, err := connect()
+func (db *pgDB) GetAccount(name string) (*Account, error) {
+	conn, err := db.pool.Acquire(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -89,11 +101,10 @@ func GetAccount(name string) (*Account, error) {
 	return a, nil
 }
 
-func StartSession(a Account) (sessionID string, err error) {
-	var conn *pgxpool.Pool
-	conn, err = connect()
+func (db *pgDB) StartSession(a Account) (sessionID string, err error) {
+	conn, err := db.pool.Acquire(context.Background())
 	if err != nil {
-		return
+		return "", err
 	}
 
 	sessionID = uuid.New().String()

@@ -47,7 +47,11 @@ func _main() (err error) {
 		*/
 	}
 	grpcServer := grpc.NewServer(opts...)
-	proto.RegisterGameWorldServer(grpcServer, newServer())
+	srv, err := newServer()
+	if err != nil {
+		return err
+	}
+	proto.RegisterGameWorldServer(grpcServer, srv)
 	grpcServer.Serve(l)
 
 	return nil
@@ -57,29 +61,38 @@ func _main() (err error) {
 type gameWorldServer struct {
 	proto.UnimplementedGameWorldServer
 
+	db        db.DB
 	mu        sync.Mutex // for msgRouter
 	msgRouter map[string]func(*proto.ClientMessage) error
 }
 
-func newServer() *gameWorldServer {
+func newServer() (*gameWorldServer, error) {
+	// TODO read from env or whatever
+	db, err := db.NewDB("postgres://vilmibm:vilmibm@localhost:5432/hermeticum")
+	if err != nil {
+		return nil, err
+	}
+
 	s := &gameWorldServer{
 		msgRouter: make(map[string]func(*proto.ClientMessage) error),
+		db:        db,
 	}
-	return s
+
+	return s, nil
 }
 
 func (s *gameWorldServer) Commands(stream proto.GameWorld_CommandsServer) error {
+	var sid string
 	for {
 		cmd, err := stream.Recv()
 		if err == io.EOF {
-			// TODO end session
-			return nil
+			return s.db.EndSession(sid)
 		}
 		if err != nil {
 			return err
 		}
 
-		sid := cmd.SessionInfo.SessionID
+		sid = cmd.SessionInfo.SessionID
 		send := s.msgRouter[sid]
 
 		msg := &proto.ClientMessage{
@@ -122,13 +135,13 @@ func (s *gameWorldServer) Messages(si *proto.SessionInfo, stream proto.GameWorld
 
 func (s *gameWorldServer) Register(ctx context.Context, auth *proto.AuthInfo) (si *proto.SessionInfo, err error) {
 	var a *db.Account
-	a, err = db.CreateAccount(auth.Username, auth.Password)
+	a, err = s.db.CreateAccount(auth.Username, auth.Password)
 	if err != nil {
 		return nil, err
 	}
 
 	var sessionID string
-	sessionID, err = db.StartSession(*a)
+	sessionID, err = s.db.StartSession(*a)
 	if err != nil {
 		return nil, err
 	}
@@ -140,13 +153,13 @@ func (s *gameWorldServer) Register(ctx context.Context, auth *proto.AuthInfo) (s
 
 func (s *gameWorldServer) Login(ctx context.Context, auth *proto.AuthInfo) (si *proto.SessionInfo, err error) {
 	var a *db.Account
-	a, err = db.ValidateCredentials(auth.Username, auth.Password)
+	a, err = s.db.ValidateCredentials(auth.Username, auth.Password)
 	if err != nil {
 		return
 	}
 
 	var sessionID string
-	sessionID, err = db.StartSession(*a)
+	sessionID, err = s.db.StartSession(*a)
 	if err != nil {
 		return
 	}
