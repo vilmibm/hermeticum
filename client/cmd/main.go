@@ -136,11 +136,10 @@ func _main() error {
 
 	client := proto.NewGameWorldClient(conn)
 
-	// TODO registration and login stuff
-
 	app := tview.NewApplication()
 
 	// TODO make a NewClientState
+	// TODO rename this, like, UI
 	cs := &ClientState{
 		App:         app,
 		SessionInfo: &proto.SessionInfo{},
@@ -256,6 +255,9 @@ func _main() error {
 		cs.SessionInfo = si
 
 		pages.SwitchToPage("game")
+		app.SetFocus(commandInput)
+		// TODO error handle
+		go cs.Messages()
 	}
 
 	registerPage.AddButton("gimme that shit", registerSubmitFn)

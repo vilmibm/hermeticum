@@ -18,12 +18,11 @@ CREATE TABLE permissions (
   read  perm    NOT NULL DEFAULT 'world',
   write perm    NOT NULL DEFAULT 'owner',
   carry perm    NOT NULL DEFAULT 'world',
-  exec  perm    NOT NULL DEFAULT 'owner'
+  exec  perm    NOT NULL DEFAULT 'world'
 );
 
 CREATE TABLE objects (
   id        serial  PRIMARY KEY,
-  shortname varchar(200) NOT NULL UNIQUE,
   avatar    boolean NOT NULL DEFAULT FALSE,
   bedroom   boolean NOT NULL DEFAULT FALSE,
   data      jsonb   NOT NULL,

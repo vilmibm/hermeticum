@@ -144,18 +144,31 @@ func (s *gameWorldServer) Messages(si *proto.SessionInfo, stream proto.GameWorld
 }
 
 func (s *gameWorldServer) Register(ctx context.Context, auth *proto.AuthInfo) (si *proto.SessionInfo, err error) {
-	var a *db.Account
-	a, err = s.db.CreateAccount(auth.Username, auth.Password)
+	var account *db.Account
+	account, err = s.db.CreateAccount(auth.Username, auth.Password)
 	if err != nil {
-		return nil, err
+		return
 	}
 
+	var avatar *db.Object
+	avatar, err = s.db.CreateAvatar(account)
+	if err != nil {
+		return
+	}
+
+	log.Printf("created %#v for %s", avatar, account.Name)
+
+	// TODO create avatar object
+	// TODO create bedroom object
+	// TODO put avatar in bedroom
+	// TODO send room info, avatar info to client (need to figure this out and update proto)
+
 	var sessionID string
-	sessionID, err = s.db.StartSession(*a)
+	sessionID, err = s.db.StartSession(*account)
 	if err != nil {
 		return nil, err
 	}
-	log.Printf("started session for %s", a.Name)
+	log.Printf("started session for %s", account.Name)
 
 	si = &proto.SessionInfo{SessionID: sessionID}
 
