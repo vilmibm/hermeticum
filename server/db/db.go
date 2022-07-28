@@ -113,3 +113,19 @@ func (db *pgDB) StartSession(a Account) (sessionID string, err error) {
 
 	return
 }
+
+func (db *pgDB) EndSession(sid string) error {
+	if sid == "" {
+		log.Println("db.EndSession called with empty session id")
+		return nil
+	}
+
+	conn, err := db.pool.Acquire(context.Background())
+	if err != nil {
+		return err
+	}
+
+	_, err = conn.Exec(context.Background(), "DELETE FROM sessions WHERE id = ?", sid)
+
+	return err
+}
