@@ -86,6 +86,8 @@ func (s *gameWorldServer) Commands(stream proto.GameWorld_CommandsServer) error 
 	for {
 		cmd, err := stream.Recv()
 		if err == io.EOF {
+			// TODO this doesn't really do anything. if a client
+			// disconnects without warning there's no EOF.
 			return s.db.EndSession(sid)
 		}
 		if err != nil {
@@ -93,6 +95,14 @@ func (s *gameWorldServer) Commands(stream proto.GameWorld_CommandsServer) error 
 		}
 
 		sid = cmd.SessionInfo.SessionID
+
+		log.Printf("verb %s in session %s", cmd.Verb, sid)
+
+		if cmd.Verb == "quit" || cmd.Verb == "q" {
+			s.msgRouter[sid] = nil
+			log.Printf("ending session %s", sid)
+			return s.db.EndSession(sid)
+		}
 		send := s.msgRouter[sid]
 
 		msg := &proto.ClientMessage{
@@ -145,6 +155,7 @@ func (s *gameWorldServer) Register(ctx context.Context, auth *proto.AuthInfo) (s
 	if err != nil {
 		return nil, err
 	}
+	log.Printf("started session for %s", a.Name)
 
 	si = &proto.SessionInfo{SessionID: sessionID}
 

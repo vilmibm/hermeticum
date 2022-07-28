@@ -6,7 +6,7 @@ CREATE TABLE accounts (
 );
 
 CREATE TABLE sessions (
-  session_id varchar(100) PRIMARY KEY,
+  id varchar(100) PRIMARY KEY,
   account integer references accounts ON DELETE CASCADE
 );
 

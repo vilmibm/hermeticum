@@ -63,7 +63,9 @@ func (cs *ClientState) HandleInput(input string) error {
 		input = input[1:]
 		parts := strings.SplitN(input, " ", 1)
 		verb = parts[0]
-		rest = parts[1]
+		if len(parts) > 1 {
+			rest = parts[1]
+		}
 	} else {
 		verb = "say"
 	}
@@ -73,7 +75,14 @@ func (cs *ClientState) HandleInput(input string) error {
 		Rest:        rest,
 	}
 	// TODO I'm punting on handling CommandAcks for now but it will be a nice UX thing later for showing connectivity problems
-	return cs.cmdStream.Send(cmd)
+	err := cs.cmdStream.Send(cmd)
+	if err != nil {
+		return err
+	}
+	if verb == "quit" || verb == "q" {
+		cs.App.Stop()
+	}
+	return nil
 }
 
 func (cs *ClientState) InitCommandStream() error {

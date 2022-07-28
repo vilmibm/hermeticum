@@ -109,7 +109,7 @@ func (db *pgDB) StartSession(a Account) (sessionID string, err error) {
 
 	sessionID = uuid.New().String()
 
-	_, err = conn.Exec(context.Background(), "INSERT INTO sessions (session_id, account) VALUES ( $1, $2 )", sessionID, a.ID)
+	_, err = conn.Exec(context.Background(), "INSERT INTO sessions (id, account) VALUES ( $1, $2 )", sessionID, a.ID)
 
 	return
 }
@@ -125,7 +125,7 @@ func (db *pgDB) EndSession(sid string) error {
 		return err
 	}
 
-	_, err = conn.Exec(context.Background(), "DELETE FROM sessions WHERE id = ?", sid)
+	_, err = conn.Exec(context.Background(), "DELETE FROM sessions WHERE id = $1", sid)
 
 	return err
 }
