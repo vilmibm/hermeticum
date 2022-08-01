@@ -3,7 +3,6 @@ package db
 import (
 	"context"
 	_ "embed"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -16,20 +15,33 @@ import (
 // go:embed schema.sql
 var schema string
 
+// TODO I have a suspicion that I'm going to want to move to an ORM like model where the object struct has a DB member and various methods on it. For now I'm just going to keep adding shit to the DB interface because if it doesn't get too long in the end then it's fine.
+
+type DB interface {
+	// Accounts
+	CreateAccount(string, string) (*Account, error)
+	ValidateCredentials(string, string) (*Account, error)
+	GetAccount(string) (*Account, error)
+	StartSession(Account) (string, error)
+	EndSession(string) error
+
+	// Presence
+	AvatarBySessionID(string) (*Object, error)
+	BedroomBySessionID(string) (*Object, error)
+	MoveInto(toMove Object, container Object) error
+}
+
 type Account struct {
 	ID     int
 	Name   string
 	Pwhash string
 }
 
-type DB interface {
-	// EnsureSchema() TODO look into tern
-	CreateAccount(string, string) (*Account, error)
-	CreateAvatar(*Account) (*Object, error)
-	ValidateCredentials(string, string) (*Account, error)
-	GetAccount(string) (*Account, error)
-	StartSession(Account) (string, error)
-	EndSession(string) error
+type Object struct {
+	ID      int
+	Avatar  bool
+	Bedroom bool
+	Data    map[string]string
 }
 
 type pgDB struct {
@@ -48,28 +60,67 @@ func NewDB(connURL string) (DB, error) {
 	return pgdb, nil
 }
 
-func (db *pgDB) CreateAccount(name, password string) (*Account, error) {
-	conn, err := db.pool.Acquire(context.Background())
+func (db *pgDB) CreateAccount(name, password string) (account *Account, err error) {
+	ctx := context.Background()
+	tx, err := db.pool.Begin(ctx)
 	if err != nil {
-		return nil, err
+		return
 	}
 
-	_, err = conn.Exec(context.Background(),
-		"INSERT INTO accounts (name, pwhash) VALUES ( $1, $2 )", name, password)
-	if err != nil {
-		return nil, err
+	defer tx.Rollback(ctx)
+
+	account = &Account{
+		Name:   name,
+		Pwhash: password,
 	}
 
-	row := conn.QueryRow(context.Background(), "SELECT id,name,pwhash FROM accounts WHERE name = $1", name)
-	a := &Account{}
-	err = row.Scan(&a.ID, &a.Name, &a.Pwhash)
-	if err != nil {
-		return nil, err
-	}
-
+	stmt := "INSERT INTO accounts (name, pwhash) VALUES ( $1, $2 ) RETURNING id"
+	err = tx.QueryRow(ctx, stmt, name, password).Scan(&account.ID)
 	// TODO handle and cleanup unqiue violations
+	if err != nil {
+		return
+	}
 
-	return a, err
+	var pid int
+	stmt = "INSERT INTO permissions DEFAULT VALUES RETURNING id"
+	err = tx.QueryRow(ctx, stmt).Scan(&pid)
+	if err != nil {
+		return
+	}
+
+	data := map[string]string{}
+	data["name"] = account.Name
+	data["description"] = fmt.Sprintf("a gaseous form. it smells faintly of %s.", randSmell())
+	av := &Object{
+		Avatar: true,
+		Data:   data,
+	}
+
+	stmt = "INSERT INTO objects ( avatar, data, perms, owner ) VALUES ( $1, $2, $3, $4 ) RETURNING id"
+	err = tx.QueryRow(ctx, stmt, av.Avatar, av.Data, pid, account.ID).Scan(&av.ID)
+	if err != nil {
+		return
+	}
+
+	stmt = "INSERT INTO permissions DEFAULT VALUES RETURNING id"
+	err = tx.QueryRow(ctx, stmt).Scan(&pid)
+	if err != nil {
+		return
+	}
+
+	bedroom := &Object{
+		Bedroom: true,
+	}
+
+	stmt = "INSERT INTO objects ( bedroom, data, perms, owner ) VALUES ( $1, $2, $3, $4 )"
+	_, err = tx.Exec(ctx, stmt, bedroom.Bedroom, bedroom.Data, pid, account.ID)
+	if err != nil {
+		return
+	}
+
+	err = tx.Commit(ctx)
+
+	return
 }
 
 func (db *pgDB) ValidateCredentials(name, password string) (*Account, error) {
@@ -87,87 +138,101 @@ func (db *pgDB) ValidateCredentials(name, password string) (*Account, error) {
 	return a, nil
 }
 
-func (db *pgDB) GetAccount(name string) (*Account, error) {
-	conn, err := db.pool.Acquire(context.Background())
-	if err != nil {
-		return nil, err
-	}
-
-	row := conn.QueryRow(context.Background(), "SELECT id, name, pwhash FROM accounts WHERE name = $1", name)
-
-	a := &Account{}
-
-	err = row.Scan(&a.ID, &a.Name, &a.Pwhash)
-	if err != nil {
-		return nil, err
-	}
-
-	return a, nil
+func (db *pgDB) GetAccount(name string) (a *Account, err error) {
+	a = &Account{}
+	stmt := "SELECT id, name, pwhash FROM accounts WHERE name = $1"
+	err = db.pool.QueryRow(context.Background(), stmt, name).Scan(&a.ID, &a.Name, &a.Pwhash)
+	return
 }
 
-func (db *pgDB) StartSession(a Account) (sessionID string, err error) {
-	conn, err := db.pool.Acquire(context.Background())
+func (db *pgDB) StartSession(a Account) (sid string, err error) {
+	sid = uuid.New().String()
+	_, err = db.pool.Exec(context.Background(),
+		"INSERT INTO sessions (id, account) VALUES ( $1, $2 )", sid, a.ID)
 	if err != nil {
-		return "", err
+		return
 	}
 
-	sessionID = uuid.New().String()
-
-	_, err = conn.Exec(context.Background(), "INSERT INTO sessions (id, account) VALUES ( $1, $2 )", sessionID, a.ID)
+	// Clean up any ghosts to prevent avatar duplication
+	// TODO subquery
+	stmt := "DELETE FROM contains WHERE contained = (SELECT id FROM objects WHERE objects.avatar = true and objects.owner = $1)"
+	_, err = db.pool.Exec(context.Background(), stmt, a.ID)
+	if err != nil {
+		log.Printf("failed to clean up ghosts for %d: %s", a.ID, err.Error())
+		err = nil
+	}
 
 	return
 }
 
-func (db *pgDB) EndSession(sid string) error {
+func (db *pgDB) EndSession(sid string) (err error) {
 	if sid == "" {
 		log.Println("db.EndSession called with empty session id")
-		return nil
+		return
 	}
 
-	conn, err := db.pool.Acquire(context.Background())
+	var o *Object
+	if o, err = db.AvatarBySessionID(sid); err == nil {
+		if _, err = db.pool.Exec(context.Background(),
+			"DELETE FROM contains WHERE contained = $1", o.ID); err != nil {
+			log.Printf("failed to remove avatar from room: %s", err.Error())
+		}
+	} else {
+		log.Printf("failed to find avatar for session %s: %s", sid, err.Error())
+	}
+
+	_, err = db.pool.Exec(context.Background(), "DELETE FROM sessions WHERE id = $1", sid)
+
+	return
+}
+
+func (db *pgDB) AvatarBySessionID(sid string) (avatar *Object, err error) {
+	avatar = &Object{}
+
+	// TODO subquery
+	stmt := `
+	SELECT (id,avatar,bedroom,data)
+	FROM objects WHERE avatar = true AND owner = (
+		SELECT a.id FROM sessions s JOIN accounts a ON s.account = a.id WHERE s.id = $1)`
+	err = db.pool.QueryRow(context.Background(), stmt, sid).Scan(
+		&avatar.ID, &avatar.Avatar, &avatar.Bedroom, &avatar.Data)
+	return
+}
+
+func (db *pgDB) BedroomBySessionID(sid string) (bedroom *Object, err error) {
+	bedroom = &Object{}
+
+	// TODO subquery
+	stmt := `
+	SELECT (id,avatar,bedroom,data)
+	FROM objects WHERE bedroom = true AND owner = (
+		SELECT a.id FROM sessions s JOIN accounts a ON s.account = a.id WHERE s.id = $1)`
+	err = db.pool.QueryRow(context.Background(), stmt, sid).Scan(
+		&bedroom.ID, &bedroom.Avatar, &bedroom.Bedroom, &bedroom.Data)
+	return
+}
+
+func (db *pgDB) MoveInto(toMove Object, container Object) error {
+	ctx := context.Background()
+	tx, err := db.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	stmt := "DELETE FROM contains WHERE contained = $1"
+	_, err = tx.Exec(ctx, stmt, toMove.ID)
 	if err != nil {
 		return err
 	}
 
-	_, err = conn.Exec(context.Background(), "DELETE FROM sessions WHERE id = $1", sid)
-
-	return err
-}
-
-type Object struct {
-	ID      int
-	Avatar  bool
-	Bedroom bool
-	data    string
-}
-
-func (db *pgDB) CreateAvatar(account *Account) (avatar *Object, err error) {
-	// TODO start a transaction
-	data := map[string]string{}
-	data["name"] = account.Name
-	data["description"] = fmt.Sprintf("a gaseous form. it smells faintly of %s.", randSmell())
-	d, _ := json.Marshal(data)
-	avatar = &Object{
-		Avatar: true,
-		data:   string(d),
-	}
-
-	// TODO I need to understand how to make use of INSERT...RETURNING
-
-	// TODO how do I determine what perm id to use? I might want to revisit the
-	// schema for that so perm knows about an object and not the other way
-	// around. I could also just store this data on the objects table. I will
-	// ponder if there is any reasonable argument for a separate permissions
-	// table.
-
-	_, err = db.pool.Exec(context.Background(), "INSERT ")
+	stmt = "INSERT INTO contains (contained, container) VALUES ($1, $1)"
+	_, err = tx.Exec(ctx, stmt, toMove.ID, container.ID)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	// TODO fetch and return avatar
-
-	return
+	return tx.Commit(ctx)
 }
 
 func randSmell() string {

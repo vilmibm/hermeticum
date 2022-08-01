@@ -150,25 +150,29 @@ func (s *gameWorldServer) Register(ctx context.Context, auth *proto.AuthInfo) (s
 		return
 	}
 
-	var avatar *db.Object
-	avatar, err = s.db.CreateAvatar(account)
-	if err != nil {
-		return
-	}
-
-	log.Printf("created %#v for %s", avatar, account.Name)
-
-	// TODO create avatar object
-	// TODO create bedroom object
-	// TODO put avatar in bedroom
-	// TODO send room info, avatar info to client (need to figure this out and update proto)
-
 	var sessionID string
 	sessionID, err = s.db.StartSession(*account)
 	if err != nil {
 		return nil, err
 	}
 	log.Printf("started session for %s", account.Name)
+
+	av, err := s.db.AvatarBySessionID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	bedroom, err := s.db.BedroomBySessionID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	err = s.db.MoveInto(*av, *bedroom)
+	if err != nil {
+		return nil, err
+	}
+
+	// TODO send room info, avatar info to client (need to figure this out and update proto)
 
 	si = &proto.SessionInfo{SessionID: sessionID}
 

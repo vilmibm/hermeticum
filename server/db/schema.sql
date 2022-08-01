@@ -1,6 +1,6 @@
 CREATE TABLE accounts (
 	id       serial PRIMARY KEY,
-	name     varchar(100)  NOT NULL,
+	name     varchar(100)  NOT NULL UNIQUE,
 	pwhash   varchar(100)  NOT NULL,
 	god      boolean       NOT NULL DEFAULT FALSE
 );
