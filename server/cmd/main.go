@@ -143,6 +143,8 @@ func (s *gameWorldServer) Messages(si *proto.SessionInfo, stream proto.GameWorld
 	}
 }
 
+// TODO make sure the Foyer is created as part of initial setup / migration
+
 func (s *gameWorldServer) Register(ctx context.Context, auth *proto.AuthInfo) (si *proto.SessionInfo, err error) {
 	var account *db.Account
 	account, err = s.db.CreateAccount(auth.Username, auth.Password)
@@ -153,23 +155,23 @@ func (s *gameWorldServer) Register(ctx context.Context, auth *proto.AuthInfo) (s
 	var sessionID string
 	sessionID, err = s.db.StartSession(*account)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to start session for %d: %w", account.ID, err)
 	}
 	log.Printf("started session for %s", account.Name)
 
 	av, err := s.db.AvatarBySessionID(sessionID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to find avatar for %s: %w", sessionID, err)
 	}
 
 	bedroom, err := s.db.BedroomBySessionID(sessionID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to find bedroom for %s: %w", sessionID, err)
 	}
 
 	err = s.db.MoveInto(*av, *bedroom)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to move %d into %d: %w", av.ID, bedroom.ID, err)
 	}
 
 	// TODO send room info, avatar info to client (need to figure this out and update proto)
@@ -200,6 +202,7 @@ func (s *gameWorldServer) Login(ctx context.Context, auth *proto.AuthInfo) (si *
 // TODO other server functions
 
 func main() {
+	// TODO at some point during startup clear out sessions
 	err := _main()
 	if err != nil {
 		log.Fatal(err.Error())

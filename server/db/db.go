@@ -81,13 +81,6 @@ func (db *pgDB) CreateAccount(name, password string) (account *Account, err erro
 		return
 	}
 
-	var pid int
-	stmt = "INSERT INTO permissions DEFAULT VALUES RETURNING id"
-	err = tx.QueryRow(ctx, stmt).Scan(&pid)
-	if err != nil {
-		return
-	}
-
 	data := map[string]string{}
 	data["name"] = account.Name
 	data["description"] = fmt.Sprintf("a gaseous form. it smells faintly of %s.", randSmell())
@@ -96,24 +89,34 @@ func (db *pgDB) CreateAccount(name, password string) (account *Account, err erro
 		Data:   data,
 	}
 
-	stmt = "INSERT INTO objects ( avatar, data, perms, owner ) VALUES ( $1, $2, $3, $4 ) RETURNING id"
-	err = tx.QueryRow(ctx, stmt, av.Avatar, av.Data, pid, account.ID).Scan(&av.ID)
+	stmt = "INSERT INTO objects ( avatar, data, owner ) VALUES ( $1, $2, $3 ) RETURNING id"
+	err = tx.QueryRow(ctx, stmt, av.Avatar, av.Data, account.ID).Scan(&av.ID)
 	if err != nil {
 		return
 	}
 
-	stmt = "INSERT INTO permissions DEFAULT VALUES RETURNING id"
-	err = tx.QueryRow(ctx, stmt).Scan(&pid)
+	stmt = "INSERT INTO permissions (object) VALUES ( $1 )"
+	_, err = tx.Exec(ctx, stmt, av.ID)
 	if err != nil {
 		return
 	}
+
+	data = map[string]string{}
+	data["name"] = "your private bedroom"
 
 	bedroom := &Object{
 		Bedroom: true,
+		Data:    data,
 	}
 
-	stmt = "INSERT INTO objects ( bedroom, data, perms, owner ) VALUES ( $1, $2, $3, $4 )"
-	_, err = tx.Exec(ctx, stmt, bedroom.Bedroom, bedroom.Data, pid, account.ID)
+	stmt = "INSERT INTO objects ( bedroom, data, owner ) VALUES ( $1, $2, $3 ) RETURNING id"
+	err = tx.QueryRow(ctx, stmt, bedroom.Bedroom, bedroom.Data, account.ID).Scan(&bedroom.ID)
+	if err != nil {
+		return
+	}
+
+	stmt = "INSERT INTO permissions (object) VALUES ( $1 )"
+	_, err = tx.Exec(ctx, stmt, bedroom.ID)
 	if err != nil {
 		return
 	}
@@ -191,11 +194,11 @@ func (db *pgDB) AvatarBySessionID(sid string) (avatar *Object, err error) {
 
 	// TODO subquery
 	stmt := `
-	SELECT (id,avatar,bedroom,data)
+	SELECT id, avatar, data
 	FROM objects WHERE avatar = true AND owner = (
 		SELECT a.id FROM sessions s JOIN accounts a ON s.account = a.id WHERE s.id = $1)`
 	err = db.pool.QueryRow(context.Background(), stmt, sid).Scan(
-		&avatar.ID, &avatar.Avatar, &avatar.Bedroom, &avatar.Data)
+		&avatar.ID, &avatar.Avatar, &avatar.Data)
 	return
 }
 
@@ -204,11 +207,11 @@ func (db *pgDB) BedroomBySessionID(sid string) (bedroom *Object, err error) {
 
 	// TODO subquery
 	stmt := `
-	SELECT (id,avatar,bedroom,data)
+	SELECT id, bedroom, data
 	FROM objects WHERE bedroom = true AND owner = (
 		SELECT a.id FROM sessions s JOIN accounts a ON s.account = a.id WHERE s.id = $1)`
 	err = db.pool.QueryRow(context.Background(), stmt, sid).Scan(
-		&bedroom.ID, &bedroom.Avatar, &bedroom.Bedroom, &bedroom.Data)
+		&bedroom.ID, &bedroom.Bedroom, &bedroom.Data)
 	return
 }
 
@@ -226,7 +229,7 @@ func (db *pgDB) MoveInto(toMove Object, container Object) error {
 		return err
 	}
 
-	stmt = "INSERT INTO contains (contained, container) VALUES ($1, $1)"
+	stmt = "INSERT INTO contains (contained, container) VALUES ($1, $2)"
 	_, err = tx.Exec(ctx, stmt, toMove.ID, container.ID)
 	if err != nil {
 		return err

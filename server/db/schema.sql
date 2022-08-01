@@ -7,19 +7,10 @@ CREATE TABLE accounts (
 
 CREATE TABLE sessions (
   id varchar(100) PRIMARY KEY,
-  account integer references accounts ON DELETE CASCADE
+  account integer REFERENCES accounts ON DELETE CASCADE
 );
 
 CREATE TYPE perm AS ENUM ('owner', 'world');
-
--- owner = 1, world = 2
-CREATE TABLE permissions (
-  id    serial  PRIMARY KEY,
-  read  perm    NOT NULL DEFAULT 'world',
-  write perm    NOT NULL DEFAULT 'owner',
-  carry perm    NOT NULL DEFAULT 'world',
-  exec  perm    NOT NULL DEFAULT 'world'
-);
 
 CREATE TABLE objects (
   id        serial  PRIMARY KEY,
@@ -27,12 +18,21 @@ CREATE TABLE objects (
   bedroom   boolean NOT NULL DEFAULT FALSE,
   data      jsonb   NOT NULL,
 
-  perms   integer references permissions,
-  owner   integer references accounts
+  owner   integer REFERENCES accounts ON DELETE RESTRICT
 );
 
+-- owner = 1, world = 2
+CREATE TABLE permissions (
+  id    serial  PRIMARY KEY,
+  read  perm    NOT NULL DEFAULT 'world',
+  write perm    NOT NULL DEFAULT 'owner',
+  carry perm    NOT NULL DEFAULT 'world',
+  exec  perm    NOT NULL DEFAULT 'world',
+
+  object integer REFERENCES objects ON DELETE CASCADE
+);
 
 CREATE TABLE contains (
-  container integer references objects ON DELETE RESTRICT,
-  contained integer references objects ON DELETE CASCADE
+  container integer REFERENCES objects ON DELETE RESTRICT,
+  contained integer REFERENCES objects ON DELETE CASCADE
 );
