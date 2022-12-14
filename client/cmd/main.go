@@ -178,6 +178,8 @@ func _main() error {
 	commandInput := tview.NewInputField().SetLabel("> ")
 	handleInput := func(_ tcell.Key) {
 		input := commandInput.GetText()
+		// TODO command history
+		commandInput.SetText("")
 		// TODO do i need to clear the input's text?
 		go cs.HandleInput(input)
 	}

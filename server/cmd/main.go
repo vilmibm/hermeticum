@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -73,6 +74,10 @@ func newServer() (*gameWorldServer, error) {
 		return nil, err
 	}
 
+	if err = db.ClearSessions(); err != nil {
+		return nil, fmt.Errorf("could not clear sessions: %w", err)
+	}
+
 	s := &gameWorldServer{
 		msgRouter: make(map[string]func(*proto.ClientMessage) error),
 		db:        db,
@@ -105,23 +110,45 @@ func (s *gameWorldServer) Commands(stream proto.GameWorld_CommandsServer) error 
 		}
 		send := s.msgRouter[sid]
 
-		msg := &proto.ClientMessage{
-			Type: proto.ClientMessage_OVERHEARD,
-			Text: fmt.Sprintf("%s sent command %s with args %s",
-				sid, cmd.Verb, cmd.Rest),
-		}
+		// TODO what is the implication of returning an error from this function?
 
-		speaker := "ECHO"
-		msg.Speaker = &speaker
-
-		err = send(msg)
+		avatar, err := s.db.AvatarBySessionID(sid)
 		if err != nil {
-			log.Printf("failed to send %v to %s: %s", msg, sid, err)
+			return s.HandleError(send, err)
+		}
+		log.Printf("found avatar %#v", avatar)
+
+		switch cmd.Verb {
+		case "say":
+			if err = s.HandleSay(avatar, cmd.Rest); err != nil {
+				s.HandleError(func(_ *proto.ClientMessage) error { return nil }, err)
+			}
+		default:
+			msg := &proto.ClientMessage{
+				Type: proto.ClientMessage_WHISPER,
+				Text: fmt.Sprintf("unknown verb: %s", cmd.Verb),
+			}
+			if err = send(msg); err != nil {
+				s.HandleError(send, err)
+			}
 		}
 
-		// TODO find the user who ran action via SessionInfo
-		// TODO get area of effect, which should include the sender
-		// TODO dispatch the command to each affected object
+		/*
+
+			msg := &proto.ClientMessage{
+				Type: proto.ClientMessage_OVERHEARD,
+				Text: fmt.Sprintf("%s sent command %s with args %s",
+					sid, cmd.Verb, cmd.Rest),
+			}
+
+			speaker := "ECHO"
+			msg.Speaker = &speaker
+
+			err = send(msg)
+			if err != nil {
+				log.Printf("failed to send %v to %s: %s", msg, sid, err)
+			}
+		*/
 	}
 }
 
@@ -194,9 +221,92 @@ func (s *gameWorldServer) Login(ctx context.Context, auth *proto.AuthInfo) (si *
 		return
 	}
 
+	av, err := s.db.AvatarBySessionID(sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find avatar for %s: %w", sessionID, err)
+	}
+
+	bedroom, err := s.db.BedroomBySessionID(sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find bedroom for %s: %w", sessionID, err)
+	}
+
+	err = s.db.MoveInto(*av, *bedroom)
+	if err != nil {
+		return nil, fmt.Errorf("failed to move %d into %d: %w", av.ID, bedroom.ID, err)
+	}
+
 	si = &proto.SessionInfo{SessionID: sessionID}
 
+	// TODO actually put them in world
+
 	return
+}
+
+func (s *gameWorldServer) HandleSay(avatar *db.Object, msg string) error {
+	name := avatar.Data["name"]
+	if name == "" {
+		// TODO determine this based on a hash or something
+		name = "a mysterious figure"
+	}
+
+	heard, err := s.db.Earshot(*avatar)
+	if err != nil {
+		log.Println(err.Error())
+		return err
+	}
+
+	log.Printf("found %#v in earshot of %#v\n", heard, avatar)
+
+	as, err := s.db.ActiveSessions()
+	if err != nil {
+		return err
+	}
+
+	sendErrs := []error{}
+
+	for _, h := range heard {
+		// TODO once we have a script engine, deliver the HEARS event
+		for _, sess := range as {
+			if sess.AccountID == h.OwnerID {
+				cm := proto.ClientMessage{
+					Type:    proto.ClientMessage_OVERHEARD,
+					Text:    msg,
+					Speaker: &name,
+				}
+				err = s.msgRouter[sess.ID](&cm)
+				if err != nil {
+					sendErrs = append(sendErrs, err)
+				}
+			}
+		}
+	}
+
+	if len(sendErrs) > 0 {
+		errMsg := "send errors: "
+		for i, err := range sendErrs {
+			errMsg += err.Error()
+			if i < len(sendErrs)-1 {
+				errMsg += ", "
+			}
+		}
+		return errors.New(errMsg)
+	}
+
+	return nil
+}
+
+func (s *gameWorldServer) HandleError(send func(*proto.ClientMessage) error, err error) error {
+	log.Printf("error: %s", err.Error())
+	msg := &proto.ClientMessage{
+		Type: proto.ClientMessage_WHISPER,
+		Text: "server error :(",
+	}
+	err = send(msg)
+	if err != nil {
+		log.Printf("error sending to client: %s", err.Error())
+	}
+	return err
 }
 
 // TODO other server functions

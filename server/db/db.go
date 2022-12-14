@@ -24,11 +24,14 @@ type DB interface {
 	GetAccount(string) (*Account, error)
 	StartSession(Account) (string, error)
 	EndSession(string) error
+	ClearSessions() error
 
 	// Presence
+	ActiveSessions() ([]Session, error)
 	AvatarBySessionID(string) (*Object, error)
 	BedroomBySessionID(string) (*Object, error)
 	MoveInto(toMove Object, container Object) error
+	Earshot(Object) ([]Object, error)
 }
 
 type Account struct {
@@ -37,11 +40,17 @@ type Account struct {
 	Pwhash string
 }
 
+type Session struct {
+	ID        string
+	AccountID int
+}
+
 type Object struct {
 	ID      int
 	Avatar  bool
 	Bedroom bool
 	Data    map[string]string
+	OwnerID int
 }
 
 type pgDB struct {
@@ -194,11 +203,11 @@ func (db *pgDB) AvatarBySessionID(sid string) (avatar *Object, err error) {
 
 	// TODO subquery
 	stmt := `
-	SELECT id, avatar, data
+	SELECT id, avatar, data, owner
 	FROM objects WHERE avatar = true AND owner = (
 		SELECT a.id FROM sessions s JOIN accounts a ON s.account = a.id WHERE s.id = $1)`
 	err = db.pool.QueryRow(context.Background(), stmt, sid).Scan(
-		&avatar.ID, &avatar.Avatar, &avatar.Data)
+		&avatar.ID, &avatar.Avatar, &avatar.Data, &avatar.OwnerID)
 	return
 }
 
@@ -236,6 +245,54 @@ func (db *pgDB) MoveInto(toMove Object, container Object) error {
 	}
 
 	return tx.Commit(ctx)
+}
+
+func (db *pgDB) Earshot(obj Object) ([]Object, error) {
+	stmt := `
+	SELECT id, avatar, bedroom, data, owner FROM objects
+	WHERE id IN (
+		SELECT contained FROM contains
+		WHERE container = (
+			SELECT container FROM contains WHERE contained = $1 LIMIT 1))`
+	rows, err := db.pool.Query(context.Background(), stmt, obj.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	out := []Object{}
+
+	for rows.Next() {
+		heard := Object{}
+		if err = rows.Scan(&heard.ID, &heard.Avatar, &heard.Bedroom, &heard.Data, &heard.OwnerID); err != nil {
+			return nil, err
+		}
+		out = append(out, heard)
+	}
+
+	return out, nil
+}
+
+func (db *pgDB) ActiveSessions() (out []Session, err error) {
+	stmt := `SELECT id, account FROM sessions`
+	rows, err := db.pool.Query(context.Background(), stmt)
+	if err != nil {
+		return
+	}
+
+	for rows.Next() {
+		s := Session{}
+		if err = rows.Scan(&s.ID, &s.AccountID); err != nil {
+			return
+		}
+		out = append(out, s)
+	}
+
+	return
+}
+
+func (db *pgDB) ClearSessions() (err error) {
+	_, err = db.pool.Exec(context.Background(), "DELETE FROM sessions")
+	return
 }
 
 func randSmell() string {
