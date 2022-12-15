@@ -22,6 +22,15 @@ var (
 	port     = flag.Int("port", 6666, "The server port")
 )
 
+/*
+	I'm going to take a much simpler approach to scripts than I did in tildemush: objects just get one text column with no revision tracking. to avoid re-parsing scripts per verb check (as every overheard verb has to be checked against an object's script every verb utterance) i want an in-memory cache of lua states. i'm not actually sure if the goroutine unsafety is a problem for that. if it is, i can put goroutines in memory and send them verbs over channels. annoying, but should work if i have to. going to start with a naive map of object ids to scripts, re-parsing them if they get edited and updating the cache.
+
+	The cache will grow without bound as users enter rooms with objects. they ought to be garbage collected. i can do that in a goroutine though (check DB for objects in rooms with no players). One complication will be when I have "cron" support for objects. they will need to be "live" (ie, their scripts executable) in order to do their periodic tasks.
+
+	An idea I just had for a cron system: respond to a "tick" verb. at server start, once all in-world objects get parsed, start emitting "tick" events from a for loop in a goroutine in rooms with objects. this can be optimized for having a way to flag periodic-able objects so they don't get the verb if they wouldn't respond.
+
+*/
+
 func _main() (err error) {
 	l, err := net.Listen("tcp", fmt.Sprintf(":%d", *port))
 	if err != nil {

@@ -17,6 +17,7 @@ CREATE TABLE objects (
   avatar    boolean NOT NULL DEFAULT FALSE,
   bedroom   boolean NOT NULL DEFAULT FALSE,
   data      jsonb   NOT NULL,
+  script    text,
 
   owner   integer REFERENCES accounts ON DELETE RESTRICT
 );
