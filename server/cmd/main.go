@@ -65,7 +65,6 @@ func _main() (err error) {
 	grpcServer.Serve(l)
 
 	return nil
-
 }
 
 type gameWorldServer struct {
