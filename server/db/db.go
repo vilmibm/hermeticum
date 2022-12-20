@@ -51,6 +51,7 @@ type Object struct {
 	Bedroom bool
 	Data    map[string]string
 	OwnerID int
+	Script  string
 }
 
 type pgDB struct {
@@ -203,11 +204,11 @@ func (db *pgDB) AvatarBySessionID(sid string) (avatar *Object, err error) {
 
 	// TODO subquery
 	stmt := `
-	SELECT id, avatar, data, owner
+	SELECT id, avatar, data, owner, script
 	FROM objects WHERE avatar = true AND owner = (
 		SELECT a.id FROM sessions s JOIN accounts a ON s.account = a.id WHERE s.id = $1)`
 	err = db.pool.QueryRow(context.Background(), stmt, sid).Scan(
-		&avatar.ID, &avatar.Avatar, &avatar.Data, &avatar.OwnerID)
+		&avatar.ID, &avatar.Avatar, &avatar.Data, &avatar.OwnerID, &avatar.Script)
 	return
 }
 
@@ -249,7 +250,7 @@ func (db *pgDB) MoveInto(toMove Object, container Object) error {
 
 func (db *pgDB) Earshot(obj Object) ([]Object, error) {
 	stmt := `
-	SELECT id, avatar, bedroom, data, owner FROM objects
+	SELECT id, avatar, bedroom, data, owner, script FROM objects
 	WHERE id IN (
 		SELECT contained FROM contains
 		WHERE container = (
@@ -263,7 +264,10 @@ func (db *pgDB) Earshot(obj Object) ([]Object, error) {
 
 	for rows.Next() {
 		heard := Object{}
-		if err = rows.Scan(&heard.ID, &heard.Avatar, &heard.Bedroom, &heard.Data, &heard.OwnerID); err != nil {
+		if err = rows.Scan(
+			&heard.ID, &heard.Avatar,
+			&heard.Bedroom, &heard.Data,
+			&heard.OwnerID, &heard.Script); err != nil {
 			return nil, err
 		}
 		out = append(out, heard)

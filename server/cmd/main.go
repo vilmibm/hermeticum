@@ -12,6 +12,7 @@ import (
 
 	"github.com/vilmibm/hermeticum/proto"
 	"github.com/vilmibm/hermeticum/server/db"
+	"github.com/vilmibm/hermeticum/server/witch"
 	"google.golang.org/grpc"
 )
 
@@ -73,6 +74,7 @@ type gameWorldServer struct {
 	db        db.DB
 	mu        sync.Mutex // for msgRouter
 	msgRouter map[string]func(*proto.ClientMessage) error
+	Gateway   *witch.Gateway
 }
 
 func newServer() (*gameWorldServer, error) {
@@ -89,6 +91,7 @@ func newServer() (*gameWorldServer, error) {
 	s := &gameWorldServer{
 		msgRouter: make(map[string]func(*proto.ClientMessage) error),
 		db:        db,
+		Gateway:   witch.NewGateway(),
 	}
 
 	return s, nil
@@ -251,20 +254,20 @@ func (s *gameWorldServer) Login(ctx context.Context, auth *proto.AuthInfo) (si *
 	return
 }
 
-func (s *gameWorldServer) HandleSay(avatar *db.Object, msg string) error {
-	name := avatar.Data["name"]
+func (s *gameWorldServer) HandleSay(sender *db.Object, msg string) error {
+	name := sender.Data["name"]
 	if name == "" {
 		// TODO determine this based on a hash or something
 		name = "a mysterious figure"
 	}
 
-	heard, err := s.db.Earshot(*avatar)
+	heard, err := s.db.Earshot(*sender)
 	if err != nil {
 		log.Println(err.Error())
 		return err
 	}
 
-	log.Printf("found %#v in earshot of %#v\n", heard, avatar)
+	log.Printf("found %#v in earshot of %#v\n", heard, sender)
 
 	as, err := s.db.ActiveSessions()
 	if err != nil {
@@ -274,6 +277,7 @@ func (s *gameWorldServer) HandleSay(avatar *db.Object, msg string) error {
 	sendErrs := []error{}
 
 	for _, h := range heard {
+		s.Gateway.VerbHandler(msg, *sender, h)
 		// TODO once we have a script engine, deliver the HEARS event
 		for _, sess := range as {
 			if sess.AccountID == h.OwnerID {
