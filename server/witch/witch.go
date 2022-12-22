@@ -73,6 +73,7 @@ func newScriptContext(obj db.Object) (*scriptContext, error) {
 }
 
 func (sc *scriptContext) Handle(ver, rest string, sender, target *db.Object) error {
+
 	// TODO call _handle function from the Lstate
 	return nil
 }

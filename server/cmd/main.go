@@ -249,8 +249,6 @@ func (s *gameWorldServer) Login(ctx context.Context, auth *proto.AuthInfo) (si *
 
 	si = &proto.SessionInfo{SessionID: sessionID}
 
-	// TODO actually put them in world
-
 	return
 }
 
@@ -276,8 +274,10 @@ func (s *gameWorldServer) HandleSay(sender *db.Object, msg string) error {
 
 	sendErrs := []error{}
 
+	// TODO figure out pointer shit
+
 	for _, h := range heard {
-		s.Gateway.VerbHandler(msg, *sender, h)
+		s.Gateway.VerbHandler("hears", msg, sender, &h)
 		// TODO once we have a script engine, deliver the HEARS event
 		for _, sess := range as {
 			if sess.AccountID == h.OwnerID {
