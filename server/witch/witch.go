@@ -72,6 +72,11 @@ func newScriptContext(obj db.Object) (*scriptContext, error) {
 	return &scriptContext{}, nil
 }
 
+func (sc *scriptContext) Handle(ver, rest string, sender, target *db.Object) error {
+	// TODO call _handle function from the Lstate
+	return nil
+}
+
 type Gateway struct {
 	// maps game object IDs to script contexts
 	m  map[int]*scriptContext
@@ -85,39 +90,14 @@ func NewGateway() *Gateway {
 	}
 }
 
-// RefreshObj ensures that the script context for the given game object is running the latest code for the object's script
-func (g *Gateway) RefreshObject(obj db.Object) error {
-	g.mu.RLock()
-	var sc *scriptContext
-
-	if sc, ok := g.m[obj.ID]; ok {
-		if !sc.NeedsRefresh(obj) {
-			g.mu.RUnlock()
-			return nil
-		}
-	}
-	g.mu.RUnlock()
-
-	sc, err := newScriptContext(obj)
-	if err != nil {
-		return err
-	}
-
-	g.mu.Lock()
-	g.m[obj.ID] = sc
-	g.mu.Unlock()
-
-	return nil
-}
-
-func (g *Gateway) VerbHandler(msg string, sender, target db.Object) error {
+func (g *Gateway) VerbHandler(verb, rest string, sender, target *db.Object) error {
 	var sc *scriptContext
 	g.mu.RLock()
 	sc, ok := g.m[target.ID]
 	g.mu.RUnlock()
 
-	if !ok || sc.NeedsRefresh(target) {
-		sc, err := newScriptContext(target)
+	if !ok || sc.NeedsRefresh(*target) {
+		sc, err := newScriptContext(*target)
 		if err != nil {
 			return err
 		}
@@ -126,6 +106,8 @@ func (g *Gateway) VerbHandler(msg string, sender, target db.Object) error {
 		g.m[target.ID] = sc
 		g.mu.Unlock()
 	}
+
+	sc.Handle(verb, rest, sender, target)
 
 	return nil
 }
