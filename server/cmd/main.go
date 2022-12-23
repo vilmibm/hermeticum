@@ -84,6 +84,10 @@ func newServer() (*gameWorldServer, error) {
 		return nil, err
 	}
 
+	if err = db.Ensure(); err != nil {
+		return nil, fmt.Errorf("failed to ensure default entities: %w", err)
+	}
+
 	if err = db.ClearSessions(); err != nil {
 		return nil, fmt.Errorf("could not clear sessions: %w", err)
 	}
@@ -91,10 +95,15 @@ func newServer() (*gameWorldServer, error) {
 	s := &gameWorldServer{
 		msgRouter: make(map[string]func(*proto.ClientMessage) error),
 		db:        db,
-		Gateway:   witch.NewGateway(),
 	}
+	gw := witch.NewGateway(s.HandleCmd)
+	s.Gateway = gw
 
 	return s, nil
+}
+
+func (s *gameWorldServer) HandleCmd(verb, rest string, sender *db.Object) {
+	// TODO
 }
 
 func (s *gameWorldServer) Commands(stream proto.GameWorld_CommandsServer) error {
@@ -129,20 +138,26 @@ func (s *gameWorldServer) Commands(stream proto.GameWorld_CommandsServer) error 
 		}
 		log.Printf("found avatar %#v", avatar)
 
-		switch cmd.Verb {
-		case "say":
-			if err = s.HandleSay(avatar, cmd.Rest); err != nil {
-				s.HandleError(func(_ *proto.ClientMessage) error { return nil }, err)
+		s.HandleCmd(cmd.Verb, cmd.Rest, avatar)
+
+		/*
+
+			switch cmd.Verb {
+			case "say":
+				if err = s.HandleSay(avatar, cmd.Rest); err != nil {
+					s.HandleError(func(_ *proto.ClientMessage) error { return nil }, err)
+				}
+			default:
+				msg := &proto.ClientMessage{
+					Type: proto.ClientMessage_WHISPER,
+					Text: fmt.Sprintf("unknown verb: %s", cmd.Verb),
+				}
+				if err = send(msg); err != nil {
+					s.HandleError(send, err)
+				}
 			}
-		default:
-			msg := &proto.ClientMessage{
-				Type: proto.ClientMessage_WHISPER,
-				Text: fmt.Sprintf("unknown verb: %s", cmd.Verb),
-			}
-			if err = send(msg); err != nil {
-				s.HandleError(send, err)
-			}
-		}
+
+		*/
 
 		/*
 
@@ -202,14 +217,25 @@ func (s *gameWorldServer) Register(ctx context.Context, auth *proto.AuthInfo) (s
 		return nil, fmt.Errorf("failed to find avatar for %s: %w", sessionID, err)
 	}
 
-	bedroom, err := s.db.BedroomBySessionID(sessionID)
+	/*
+		bedroom, err := s.db.BedroomBySessionID(sessionID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to find bedroom for %s: %w", sessionID, err)
+		}
+
+		err = s.db.MoveInto(*av, *bedroom)
+		if err != nil {
+			return nil, fmt.Errorf("failed to move %d into %d: %w", av.ID, bedroom.ID, err)
+		}
+	*/
+
+	foyer, err := s.db.GetObject("system", "foyer")
 	if err != nil {
-		return nil, fmt.Errorf("failed to find bedroom for %s: %w", sessionID, err)
+		return nil, fmt.Errorf("failed to find foyer: %w", err)
 	}
 
-	err = s.db.MoveInto(*av, *bedroom)
-	if err != nil {
-		return nil, fmt.Errorf("failed to move %d into %d: %w", av.ID, bedroom.ID, err)
+	if err = s.db.MoveInto(*av, *foyer); err != nil {
+		return nil, fmt.Errorf("failed to move %d into %d: %w", av.ID, foyer.ID, err)
 	}
 
 	// TODO send room info, avatar info to client (need to figure this out and update proto)

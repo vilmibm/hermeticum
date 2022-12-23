@@ -72,7 +72,7 @@ func newScriptContext(obj db.Object) (*scriptContext, error) {
 	return &scriptContext{}, nil
 }
 
-func (sc *scriptContext) Handle(ver, rest string, sender, target *db.Object) error {
+func (sc *scriptContext) Handle(verb, rest string, sender, target *db.Object) error {
 
 	// TODO call _handle function from the Lstate
 	return nil
@@ -82,12 +82,15 @@ type Gateway struct {
 	// maps game object IDs to script contexts
 	m  map[int]*scriptContext
 	mu sync.RWMutex
+	cb func(string, string, *db.Object)
 }
 
-func NewGateway() *Gateway {
+func NewGateway(cb func(string, string, *db.Object)) *Gateway {
 	return &Gateway{
 		m:  map[int]*scriptContext{},
 		mu: sync.RWMutex{},
+		// TODO use cb from scriptContext
+		cb: cb,
 	}
 }
 

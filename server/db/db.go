@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v4/pgxpool"
 )
 
-// go:embed schema.sql
+//go:embed schema.sql
 var schema string
 
 // TODO I have a suspicion that I'm going to want to move to an ORM like model where the object struct has a DB member and various methods on it. For now I'm just going to keep adding shit to the DB interface because if it doesn't get too long in the end then it's fine.
@@ -26,6 +26,12 @@ type DB interface {
 	EndSession(string) error
 	ClearSessions() error
 
+	// General
+	GetObject(owner, name string) (*Object, error)
+
+	// Defaults
+	Ensure() error
+
 	// Presence
 	ActiveSessions() ([]Session, error)
 	AvatarBySessionID(string) (*Object, error)
@@ -38,6 +44,7 @@ type Account struct {
 	ID     int
 	Name   string
 	Pwhash string
+	God    bool
 }
 
 type Session struct {
@@ -70,7 +77,59 @@ func NewDB(connURL string) (DB, error) {
 	return pgdb, nil
 }
 
+// Ensure checks for and then creates default resources if they do not exist (like the Foyer)
+func (db *pgDB) Ensure() error {
+	// TODO this is sloppy but shrug
+	_, err := db.pool.Exec(context.Background(), schema)
+	//log.Println(err)
+	sysAcc, err := db.GetAccount("system")
+	if err != nil {
+		// TODO actually check error. for now assuming it means does not exist
+		sysAcc, err = db.CreateGod("system", "")
+		if err != nil {
+			return fmt.Errorf("failed to create system account: %w", err)
+		}
+	}
+
+	log.Printf("%#v", sysAcc)
+
+	if _, err := db.GetObject("system", "foyer"); err != nil {
+		data := map[string]string{}
+		data["name"] = "foyer"
+		data["description"] = "a big room. the ceiling is painted with constellations."
+		foyer := &Object{
+			Data:   data,
+			Script: "",
+			// TODO default room script
+		}
+		if err = db.CreateObject(sysAcc, foyer); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (db *pgDB) CreateGod(name, password string) (account *Account, err error) {
+	account = &Account{
+		Name:   name,
+		Pwhash: password,
+		God:    true,
+	}
+
+	return account, db.createAccount(account)
+}
+
 func (db *pgDB) CreateAccount(name, password string) (account *Account, err error) {
+	account = &Account{
+		Name:   name,
+		Pwhash: password,
+	}
+
+	return account, db.createAccount(account)
+}
+
+func (db *pgDB) createAccount(account *Account) (err error) {
 	ctx := context.Background()
 	tx, err := db.pool.Begin(ctx)
 	if err != nil {
@@ -79,13 +138,8 @@ func (db *pgDB) CreateAccount(name, password string) (account *Account, err erro
 
 	defer tx.Rollback(ctx)
 
-	account = &Account{
-		Name:   name,
-		Pwhash: password,
-	}
-
-	stmt := "INSERT INTO accounts (name, pwhash) VALUES ( $1, $2 ) RETURNING id"
-	err = tx.QueryRow(ctx, stmt, name, password).Scan(&account.ID)
+	stmt := "INSERT INTO accounts (name, pwhash, god) VALUES ( $1, $2, $3 ) RETURNING id"
+	err = tx.QueryRow(ctx, stmt, account.Name, account.Pwhash, account.God).Scan(&account.ID)
 	// TODO handle and cleanup unqiue violations
 	if err != nil {
 		return
@@ -97,10 +151,11 @@ func (db *pgDB) CreateAccount(name, password string) (account *Account, err erro
 	av := &Object{
 		Avatar: true,
 		Data:   data,
+		Script: "",
 	}
 
-	stmt = "INSERT INTO objects ( avatar, data, owner ) VALUES ( $1, $2, $3 ) RETURNING id"
-	err = tx.QueryRow(ctx, stmt, av.Avatar, av.Data, account.ID).Scan(&av.ID)
+	stmt = "INSERT INTO objects ( avatar, data, owner, script ) VALUES ( $1, $2, $3, $4 ) RETURNING id"
+	err = tx.QueryRow(ctx, stmt, av.Avatar, av.Data, account.ID, av.Script).Scan(&av.ID)
 	if err != nil {
 		return
 	}
@@ -117,10 +172,11 @@ func (db *pgDB) CreateAccount(name, password string) (account *Account, err erro
 	bedroom := &Object{
 		Bedroom: true,
 		Data:    data,
+		Script:  "",
 	}
 
-	stmt = "INSERT INTO objects ( bedroom, data, owner ) VALUES ( $1, $2, $3 ) RETURNING id"
-	err = tx.QueryRow(ctx, stmt, bedroom.Bedroom, bedroom.Data, account.ID).Scan(&bedroom.ID)
+	stmt = "INSERT INTO objects ( bedroom, data, owner, script ) VALUES ( $1, $2, $3, $4 ) RETURNING id"
+	err = tx.QueryRow(ctx, stmt, bedroom.Bedroom, bedroom.Data, account.ID, bedroom.Script).Scan(&bedroom.ID)
 	if err != nil {
 		return
 	}
@@ -131,15 +187,17 @@ func (db *pgDB) CreateAccount(name, password string) (account *Account, err erro
 		return
 	}
 
-	err = tx.Commit(ctx)
-
-	return
+	return tx.Commit(ctx)
 }
 
 func (db *pgDB) ValidateCredentials(name, password string) (*Account, error) {
 	a, err := db.GetAccount(name)
 	if err != nil {
 		return nil, err
+	}
+
+	if a.Pwhash == "" {
+		return nil, errors.New("this account cannot be logged into")
 	}
 
 	// TODO hashing lol
@@ -276,6 +334,20 @@ func (db *pgDB) Earshot(obj Object) ([]Object, error) {
 	return out, nil
 }
 
+func (db *pgDB) GetObject(owner, name string) (obj *Object, err error) {
+	ctx := context.Background()
+	obj = &Object{}
+	stmt := `
+		SELECT id, avatar, data, owner, script
+		FROM objects
+		WHERE owner = $1 AND data['name'] = $2`
+	err = db.pool.QueryRow(ctx, stmt, owner, fmt.Sprintf(`"%s"`, name)).Scan(
+		&obj.ID, &obj.Avatar, &obj.Data, &obj.OwnerID, &obj.Script)
+	// TODO i think the escaping here is going to create a sadness ^
+
+	return
+}
+
 func (db *pgDB) ActiveSessions() (out []Session, err error) {
 	stmt := `SELECT id, account FROM sessions`
 	rows, err := db.pool.Query(context.Background(), stmt)
@@ -297,6 +369,24 @@ func (db *pgDB) ActiveSessions() (out []Session, err error) {
 func (db *pgDB) ClearSessions() (err error) {
 	_, err = db.pool.Exec(context.Background(), "DELETE FROM sessions")
 	return
+}
+
+func (db *pgDB) CreateObject(owner *Account, obj *Object) error {
+	ctx := context.Background()
+	stmt := `
+		INSERT INTO objects (avatar, bedroom, data, script, owner)
+		VALUES ( $1, $2, $3, $4, $5)
+		RETURNING id
+	`
+
+	err := db.pool.QueryRow(ctx, stmt,
+		obj.Avatar, obj.Bedroom, obj.Data, obj.Script, owner.ID).Scan(
+		&obj.ID)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func randSmell() string {
