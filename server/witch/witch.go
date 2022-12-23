@@ -37,6 +37,10 @@ has({
 hears(".*eat.*", function(msg)
 	does("quivers nervously")
 end)
+
+hears(".*", function(msg)
+	tellMe(sender().name + " says " + msg)
+end)
 `
 
 /*
@@ -94,14 +98,14 @@ func NewGateway(cb func(string, string, *db.Object)) *Gateway {
 	}
 }
 
-func (g *Gateway) VerbHandler(verb, rest string, sender, target *db.Object) error {
+func (g *Gateway) VerbHandler(verb, rest string, sender, target db.Object) error {
 	var sc *scriptContext
 	g.mu.RLock()
 	sc, ok := g.m[target.ID]
 	g.mu.RUnlock()
 
-	if !ok || sc.NeedsRefresh(*target) {
-		sc, err := newScriptContext(*target)
+	if !ok || sc.NeedsRefresh(target) {
+		sc, err := newScriptContext(target)
 		if err != nil {
 			return err
 		}
@@ -111,7 +115,7 @@ func (g *Gateway) VerbHandler(verb, rest string, sender, target *db.Object) erro
 		g.mu.Unlock()
 	}
 
-	sc.Handle(verb, rest, sender, target)
+	sc.Handle(verb, rest, &sender, &target)
 
 	return nil
 }

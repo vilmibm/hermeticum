@@ -106,6 +106,26 @@ func (s *gameWorldServer) HandleCmd(verb, rest string, sender *db.Object) {
 	// TODO
 }
 
+/*
+	what's the flow for when i'm at a computer and type /say hi ?
+
+	- server gets "SAY hi" from vilmibm
+	- server gets all objects in earshot (including vilmibm's avatar)
+	- for each object:
+		- call whatever handler it has for "hears"
+
+	and then that's it, right? over in witch land:
+
+	- hears handler for an avatar has:
+
+			tellMe(sender.get("name") + " says " + msg)
+
+	- tellMe somehow calls a method on the gameWorldServer that can look up a
+		session ID and thus use the msgRouter to send a message. I'm going to sleep
+		on this so I can think about the right way to structure those dependencies.
+
+*/
+
 func (s *gameWorldServer) Commands(stream proto.GameWorld_CommandsServer) error {
 	var sid string
 	for {
@@ -137,6 +157,12 @@ func (s *gameWorldServer) Commands(stream proto.GameWorld_CommandsServer) error 
 			return s.HandleError(send, err)
 		}
 		log.Printf("found avatar %#v", avatar)
+
+		affected, err := s.db.Earshot(*avatar)
+
+		for _, o := range affected {
+			err = s.Gateway.VerbHandler(cmd.Verb, cmd.Rest, *avatar, o)
+		}
 
 		s.HandleCmd(cmd.Verb, cmd.Rest, avatar)
 
