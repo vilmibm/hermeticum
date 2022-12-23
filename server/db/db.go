@@ -24,6 +24,7 @@ type DB interface {
 	GetAccount(string) (*Account, error)
 	StartSession(Account) (string, error)
 	EndSession(string) error
+	ActiveSessions() ([]Session, error)
 	ClearSessions() error
 
 	// General
@@ -33,7 +34,6 @@ type DB interface {
 	Ensure() error
 
 	// Presence
-	ActiveSessions() ([]Session, error)
 	AvatarBySessionID(string) (*Object, error)
 	BedroomBySessionID(string) (*Object, error)
 	MoveInto(toMove Object, container Object) error
@@ -91,13 +91,13 @@ func (db *pgDB) Ensure() error {
 		}
 	}
 
-	log.Printf("%#v", sysAcc)
-
-	if _, err := db.GetObject("system", "foyer"); err != nil {
+	foyer, err := db.GetObject("system", "foyer")
+	if err != nil {
+		// TODO actually check error. for now assuming it means does not exist
 		data := map[string]string{}
 		data["name"] = "foyer"
 		data["description"] = "a big room. the ceiling is painted with constellations."
-		foyer := &Object{
+		foyer = &Object{
 			Data:   data,
 			Script: "",
 			// TODO default room script
@@ -106,6 +106,30 @@ func (db *pgDB) Ensure() error {
 			return err
 		}
 	}
+
+	egg, err := db.GetObject("system", "floor egg")
+	if err != nil {
+		// TODO actually check error. for now assuming it means does not exist
+		data := map[string]string{}
+		data["name"] = "floor egg"
+		data["description"] = "it's an egg and it's on the floor."
+		egg = &Object{
+			Data:   data,
+			Script: "",
+			// TODO default room script
+		}
+		if err = db.CreateObject(sysAcc, egg); err != nil {
+			return err
+		}
+	}
+
+	sysAva, err := db.GetAccountAvatar(*sysAcc)
+	if err != nil {
+		return fmt.Errorf("could not find avatar for system account: %w", err)
+	}
+
+	db.MoveInto(*sysAva, *foyer)
+	db.MoveInto(*egg, *foyer)
 
 	return nil
 }
@@ -343,9 +367,27 @@ func (db *pgDB) GetObject(owner, name string) (obj *Object, err error) {
 		WHERE owner = $1 AND data['name'] = $2`
 	err = db.pool.QueryRow(ctx, stmt, owner, fmt.Sprintf(`"%s"`, name)).Scan(
 		&obj.ID, &obj.Avatar, &obj.Data, &obj.OwnerID, &obj.Script)
-	// TODO i think the escaping here is going to create a sadness ^
 
 	return
+}
+
+func (db *pgDB) GetAccountAvatar(account Account) (*Object, error) {
+	ctx := context.Background()
+	obj := &Object{
+		OwnerID: account.ID,
+		Avatar:  true,
+	}
+	stmt := `
+		SELECT id, data, script
+		FROM objects
+		WHERE owner = $1 AND avatar IS true`
+	err := db.pool.QueryRow(ctx, stmt, account.ID).Scan(
+		&obj.ID, &obj.Data, &obj.Script)
+	if err != nil {
+		return nil, err
+	}
+
+	return obj, nil
 }
 
 func (db *pgDB) ActiveSessions() (out []Session, err error) {
