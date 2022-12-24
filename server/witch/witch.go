@@ -1,8 +1,6 @@
 package witch
 
 import (
-	"sync"
-
 	"github.com/vilmibm/hermeticum/server/db"
 	lua "github.com/yuin/gopher-lua"
 )
@@ -15,14 +13,14 @@ import (
 
 */
 
-type scriptContext struct {
+type ScriptContext struct {
 	script   string
 	l        *lua.LState
 	incoming chan string
 	// TODO whatever is needed to support calling a Go API
 }
 
-func (sc *scriptContext) NeedsRefresh(obj db.Object) bool {
+func (sc *ScriptContext) NeedsRefresh(obj db.Object) bool {
 	return sc.script != obj.Script
 }
 
@@ -62,7 +60,7 @@ end)
 // 	 - do i inject from Go or prepend some Lua code?
 // TODO figure out how the Lua code can affect Go and thus the database
 
-func newScriptContext(obj db.Object) (*scriptContext, error) {
+func NewScriptContext(obj db.Object) (*ScriptContext, error) {
 	l := lua.NewState()
 
 	l.SetGlobal("has", l.NewFunction(hasWrapper(obj)))
@@ -73,49 +71,10 @@ func newScriptContext(obj db.Object) (*scriptContext, error) {
 		return nil, err
 	}
 
-	return &scriptContext{}, nil
+	return &ScriptContext{}, nil
 }
 
-func (sc *scriptContext) Handle(verb, rest string, sender, target *db.Object) error {
-
+func (sc *ScriptContext) Handle(verb, rest string, sender, target db.Object) error {
 	// TODO call _handle function from the Lstate
-	return nil
-}
-
-type Gateway struct {
-	// maps game object IDs to script contexts
-	m  map[int]*scriptContext
-	mu sync.RWMutex
-	cb func(string, string, *db.Object)
-}
-
-func NewGateway(cb func(string, string, *db.Object)) *Gateway {
-	return &Gateway{
-		m:  map[int]*scriptContext{},
-		mu: sync.RWMutex{},
-		// TODO use cb from scriptContext
-		cb: cb,
-	}
-}
-
-func (g *Gateway) VerbHandler(verb, rest string, sender, target db.Object) error {
-	var sc *scriptContext
-	g.mu.RLock()
-	sc, ok := g.m[target.ID]
-	g.mu.RUnlock()
-
-	if !ok || sc.NeedsRefresh(target) {
-		sc, err := newScriptContext(target)
-		if err != nil {
-			return err
-		}
-
-		g.mu.Lock()
-		g.m[target.ID] = sc
-		g.mu.Unlock()
-	}
-
-	sc.Handle(verb, rest, &sender, &target)
-
 	return nil
 }

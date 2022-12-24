@@ -71,10 +71,12 @@ func _main() (err error) {
 type gameWorldServer struct {
 	proto.UnimplementedGameWorldServer
 
-	db        db.DB
-	mu        sync.Mutex // for msgRouter
-	msgRouter map[string]func(*proto.ClientMessage) error
-	Gateway   *witch.Gateway
+	db             db.DB
+	msgRouterMutex sync.Mutex
+	msgRouter      map[string]func(*proto.ClientMessage) error
+	Gateway        *witch.Gateway
+	scripts        map[int]*witch.ScriptContext
+	scriptsMutex   sync.RWMutex
 }
 
 func newServer() (*gameWorldServer, error) {
@@ -93,13 +95,37 @@ func newServer() (*gameWorldServer, error) {
 	}
 
 	s := &gameWorldServer{
-		msgRouter: make(map[string]func(*proto.ClientMessage) error),
-		db:        db,
+		msgRouter:    make(map[string]func(*proto.ClientMessage) error),
+		db:           db,
+		scripts:      make(map[int]*witch.ScriptContext),
+		scriptsMutex: sync.RWMutex{},
 	}
-	gw := witch.NewGateway(s.HandleCmd)
-	s.Gateway = gw
 
 	return s, nil
+}
+
+func (s *gameWorldServer) verbHandler(verb, rest string, sender, target db.Object) error {
+	/*
+		So right here is a problem: we are definitely making >1 LuaState per
+		goroutine. Top priority before anything else is getting a goroutine made
+		for the script contexts
+	*/
+	s.scriptsMutex.RLock()
+	sc, ok := s.scripts[target.ID]
+	s.scriptsMutex.RUnlock()
+
+	if !ok || sc.NeedsRefresh(target) {
+		sc, err := witch.NewScriptContext(target)
+		if err != nil {
+			return err
+		}
+
+		s.scriptsMutex.Lock()
+		s.scripts[target.ID] = sc
+		s.scriptsMutex.Unlock()
+	}
+
+	return sc.Handle(verb, rest, sender, target)
 }
 
 func (s *gameWorldServer) HandleCmd(verb, rest string, sender *db.Object) {
@@ -213,9 +239,9 @@ func (s *gameWorldServer) Ping(ctx context.Context, _ *proto.SessionInfo) (*prot
 }
 
 func (s *gameWorldServer) Messages(si *proto.SessionInfo, stream proto.GameWorld_MessagesServer) error {
-	s.mu.Lock()
+	s.msgRouterMutex.Lock()
 	s.msgRouter[si.SessionID] = stream.Send
-	s.mu.Unlock()
+	s.msgRouterMutex.Unlock()
 
 	// TODO this is clearly bad but it works. I should refactor this so that messages are received on a channel.
 	for {
