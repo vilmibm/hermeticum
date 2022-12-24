@@ -1,13 +1,16 @@
 package witch
 
 import (
+	"log"
+
 	"github.com/vilmibm/hermeticum/server/db"
 	lua "github.com/yuin/gopher-lua"
 )
 
 func hasWrapper(obj db.Object) func(*lua.LState) int {
 	return func(ls *lua.LState) int {
-		//lv := ls.ToTable(1)
+		lv := ls.ToTable(1)
+		log.Println(lv)
 		return 0
 	}
 }

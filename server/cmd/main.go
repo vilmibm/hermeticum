@@ -74,7 +74,6 @@ type gameWorldServer struct {
 	db             db.DB
 	msgRouterMutex sync.Mutex
 	msgRouter      map[string]func(*proto.ClientMessage) error
-	Gateway        *witch.Gateway
 	scripts        map[int]*witch.ScriptContext
 	scriptsMutex   sync.RWMutex
 }
@@ -105,17 +104,14 @@ func newServer() (*gameWorldServer, error) {
 }
 
 func (s *gameWorldServer) verbHandler(verb, rest string, sender, target db.Object) error {
-	/*
-		So right here is a problem: we are definitely making >1 LuaState per
-		goroutine. Top priority before anything else is getting a goroutine made
-		for the script contexts
-	*/
+	// I think i should rethink this. sc should maybe be permanent and then they re-create LStates
 	s.scriptsMutex.RLock()
 	sc, ok := s.scripts[target.ID]
 	s.scriptsMutex.RUnlock()
+	var err error
 
-	if !ok || sc.NeedsRefresh(target) {
-		sc, err := witch.NewScriptContext(target)
+	if !ok {
+		sc, err = witch.NewScriptContext()
 		if err != nil {
 			return err
 		}
@@ -125,7 +121,16 @@ func (s *gameWorldServer) verbHandler(verb, rest string, sender, target db.Objec
 		s.scriptsMutex.Unlock()
 	}
 
-	return sc.Handle(verb, rest, sender, target)
+	vc := witch.VerbContext{
+		Verb:   verb,
+		Rest:   rest,
+		Sender: sender,
+		Target: target,
+	}
+
+	sc.Handle(vc)
+
+	return nil
 }
 
 func (s *gameWorldServer) HandleCmd(verb, rest string, sender *db.Object) {
@@ -187,10 +192,10 @@ func (s *gameWorldServer) Commands(stream proto.GameWorld_CommandsServer) error 
 		affected, err := s.db.Earshot(*avatar)
 
 		for _, o := range affected {
-			err = s.Gateway.VerbHandler(cmd.Verb, cmd.Rest, *avatar, o)
+			err = s.verbHandler(cmd.Verb, cmd.Rest, *avatar, o)
 		}
 
-		s.HandleCmd(cmd.Verb, cmd.Rest, avatar)
+		//s.HandleCmd(cmd.Verb, cmd.Rest, avatar)
 
 		/*
 
@@ -355,7 +360,7 @@ func (s *gameWorldServer) HandleSay(sender *db.Object, msg string) error {
 	// TODO figure out pointer shit
 
 	for _, h := range heard {
-		s.Gateway.VerbHandler("hears", msg, sender, &h)
+		s.verbHandler("hears", msg, *sender, h)
 		// TODO once we have a script engine, deliver the HEARS event
 		for _, sess := range as {
 			if sess.AccountID == h.OwnerID {

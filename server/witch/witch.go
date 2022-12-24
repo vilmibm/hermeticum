@@ -1,6 +1,8 @@
 package witch
 
 import (
+	"log"
+
 	"github.com/vilmibm/hermeticum/server/db"
 	lua "github.com/yuin/gopher-lua"
 )
@@ -12,17 +14,6 @@ import (
 	Game objects get pulled from the DB into memory and their scripts become Lua States.
 
 */
-
-type ScriptContext struct {
-	script   string
-	l        *lua.LState
-	incoming chan string
-	// TODO whatever is needed to support calling a Go API
-}
-
-func (sc *ScriptContext) NeedsRefresh(obj db.Object) bool {
-	return sc.script != obj.Script
-}
 
 // TODO using a dummy script for now
 
@@ -60,21 +51,51 @@ end)
 // 	 - do i inject from Go or prepend some Lua code?
 // TODO figure out how the Lua code can affect Go and thus the database
 
-func NewScriptContext(obj db.Object) (*ScriptContext, error) {
-	l := lua.NewState()
-
-	l.SetGlobal("has", l.NewFunction(hasWrapper(obj)))
-	l.SetGlobal("_handlers", l.NewTable())
-
-	//if err := l.DoString(obj.Script); err != nil {
-	if err := l.DoString(dummyScript); err != nil {
-		return nil, err
-	}
-
-	return &ScriptContext{}, nil
+type VerbContext struct {
+	Verb   string
+	Rest   string
+	Sender db.Object
+	Target db.Object
 }
 
-func (sc *ScriptContext) Handle(verb, rest string, sender, target db.Object) error {
-	// TODO call _handle function from the Lstate
-	return nil
+type ScriptContext struct {
+	script   string
+	incoming chan VerbContext
+}
+
+func NewScriptContext() (*ScriptContext, error) {
+	sc := &ScriptContext{}
+	sc.incoming = make(chan VerbContext)
+
+	go func() {
+		var l *lua.LState
+		var err error
+		var vc VerbContext
+		for {
+			vc = <-sc.incoming
+			//if vc.Target.Script != sc.script {
+			if dummyScript != sc.script {
+				//sc.script = vc.Target.Script
+				sc.script = dummyScript
+				l = lua.NewState()
+				l.SetGlobal("has", l.NewFunction(hasWrapper(vc.Target)))
+				l.SetGlobal("hears", l.NewFunction(hearsWrapper(vc.Target)))
+				l.SetGlobal("_handlers", l.NewTable())
+				// TODO other setup
+				//if err := l.DoString(obj.Script); err != nil {
+				if err = l.DoString(dummyScript); err != nil {
+					log.Printf("error parsing script %s: %s", dummyScript, err.Error())
+				}
+			}
+
+			// TODO actually trigger the Lua script
+		}
+	}()
+
+	return sc, nil
+}
+
+func (sc *ScriptContext) Handle(vc VerbContext) {
+	log.Printf("%#v %#v", sc, vc)
+	sc.incoming <- vc
 }
