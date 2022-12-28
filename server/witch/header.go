@@ -1,31 +1,51 @@
 package witch
 
 import (
+	"fmt"
 	"log"
 
 	"github.com/vilmibm/hermeticum/server/db"
 	lua "github.com/yuin/gopher-lua"
 )
 
-func hasWrapper(obj db.Object) func(*lua.LState) int {
-	return func(ls *lua.LState) int {
-		lv := ls.ToTable(1)
-		log.Println(lv)
-		return 0
+const DefaultAvatarScript = `
+	has({
+		name = 
+	})
+`
+
+func SetDefaultAvatarScript(obj *db.Object) {
+	hasInvocation := "has({\n"
+	for k, v := range obj.Data {
+		hasInvocation += fmt.Sprintf(`%s = "%s"\n`, k, v)
 	}
+	hasInvocation += "})"
+
+	obj.Script = fmt.Sprintf(`%s
+hears(".*", function() 
+	tellMe(sender, msg)
+end)
+`, hasInvocation)
+
 }
 
-func hearsWrapper(obj db.Object) func(*lua.LState) int {
-	return func(ls *lua.LState) int {
-		// TODO get handler from _handlers
-		// TODO call it
-		// TODO how to get message in here?
-
-		return 0
-	}
+func witchHas(l *lua.LState) int {
+	lv := l.ToTable(1)
+	log.Println(lv)
+	return 0
 }
 
-func does(ls *lua.LState) int {
+func witchHears(l *lua.LState) int {
+	// TODO register handler
+	handlers := l.GetGlobal("_handlers").(*lua.LTable)
+	log.Println(handlers)
+	pattern := l.ToString(1)
+	cb := l.ToFunction(2)
+	addHandler(l, "say", pattern, cb)
+	return 0
+}
+
+func witchDoes(ls *lua.LState) int {
 	// TODO how to feed events back into the server?
 	// it needs to behave like an event showing up in Commands stream
 	// this handler needs a reference to the gateway which has a channel for sending events that the server will see?
@@ -52,15 +72,19 @@ func does(ls *lua.LState) int {
 		}
 */
 
-func addHandler(ls *lua.LState) int {
-	verb := ls.ToString(1)
-	pattern := ls.ToString(2)
-	cb := ls.ToFunction(3)
-	handlers := ls.GetGlobal("_handlers").(*lua.LTable)
-	newHandler := ls.NewTable()
-	newHandler.RawSetString(pattern, cb)
-	handlerMap := handlers.RawGetString(verb).(*lua.LTable)
-	handlerMap.RawSetString(verb, newHandler)
+func addHandler(l *lua.LState, verb, pattern string, cb *lua.LFunction) int {
+	handlers := l.GetGlobal("_handlers").(*lua.LTable)
+
+	verbHandlers, ok := handlers.RawGetString(verb).(*lua.LTable)
+	if !ok {
+		verbHandlers = l.NewTable()
+		handlers.RawSetString(verb, verbHandlers)
+	}
+
+	log.Println("addHandler")
+	log.Printf("%#v", cb)
+
+	verbHandlers.RawSetString(pattern, cb)
 
 	return 0
 }

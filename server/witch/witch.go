@@ -1,7 +1,9 @@
 package witch
 
 import (
+	"fmt"
 	"log"
+	"regexp"
 
 	"github.com/vilmibm/hermeticum/server/db"
 	lua "github.com/yuin/gopher-lua"
@@ -23,12 +25,10 @@ has({
 	description = "a plate of pasta covered in pomodoro sauce"
 })
 
-hears(".*eat.*", function(msg)
-	does("quivers nervously")
-end)
-
-hears(".*", function(msg)
-	tellMe(sender().name + " says " + msg)
+hears(".*", function()
+	print(sender.name)
+	print(msg)
+	tellMe(msg)
 end)
 `
 
@@ -46,11 +46,6 @@ end)
 `
 */
 
-// TODO figure out channel stuff
-// TODO figure out how to inject WITCH header
-// 	 - do i inject from Go or prepend some Lua code?
-// TODO figure out how the Lua code can affect Go and thus the database
-
 type VerbContext struct {
 	Verb   string
 	Rest   string
@@ -61,10 +56,13 @@ type VerbContext struct {
 type ScriptContext struct {
 	script   string
 	incoming chan VerbContext
+	tell     func(int, string)
 }
 
-func NewScriptContext() (*ScriptContext, error) {
-	sc := &ScriptContext{}
+func NewScriptContext(tell func(int, string)) (*ScriptContext, error) {
+	sc := &ScriptContext{
+		tell: tell,
+	}
 	sc.incoming = make(chan VerbContext)
 
 	go func() {
@@ -78,9 +76,17 @@ func NewScriptContext() (*ScriptContext, error) {
 				//sc.script = vc.Target.Script
 				sc.script = dummyScript
 				l = lua.NewState()
-				l.SetGlobal("has", l.NewFunction(hasWrapper(vc.Target)))
-				l.SetGlobal("hears", l.NewFunction(hearsWrapper(vc.Target)))
+				l.SetGlobal("has", l.NewFunction(witchHas))
+				l.SetGlobal("hears", l.NewFunction(witchHears))
 				l.SetGlobal("_handlers", l.NewTable())
+				l.SetGlobal("tellMe", l.NewFunction(func(l *lua.LState) int {
+					sender := l.GetGlobal("sender").(*lua.LTable)
+					senderID := int(lua.LVAsNumber(sender.RawGetString("ID")))
+					msg := l.ToString(1)
+					log.Printf("%#v %s\n", sender, msg)
+					sc.tell(senderID, msg)
+					return 0
+				}))
 				// TODO other setup
 				//if err := l.DoString(obj.Script); err != nil {
 				if err = l.DoString(dummyScript); err != nil {
@@ -88,7 +94,32 @@ func NewScriptContext() (*ScriptContext, error) {
 				}
 			}
 
-			// TODO actually trigger the Lua script
+			// TODO check execute permission and bail out potentially
+
+			senderT := l.NewTable()
+			senderT.RawSetString("name", lua.LString(vc.Sender.Data["name"]))
+			senderT.RawSetString("ID", lua.LString(vc.Sender.Data["ID"]))
+			l.SetGlobal("sender", senderT)
+			l.SetGlobal("msg", lua.LString(vc.Rest))
+
+			handlers := l.GetGlobal("_handlers").(*lua.LTable)
+			handlers.ForEach(func(k, v lua.LValue) {
+				if k.String() != vc.Verb {
+					return
+				}
+				v.(*lua.LTable).ForEach(func(kk, vv lua.LValue) {
+					pattern := regexp.MustCompile(kk.String())
+					if pattern.MatchString(vc.Rest) {
+						// TODO TODO TODO TODO TODO
+						// this could be a remote code execution vuln; but by being here, I
+						// believe vc.Verb has been effectively validated as "not a pile of
+						// lua code" since it matched a handler.
+						if err = l.DoString(fmt.Sprintf(`_handlers.%s["%s"]()`, vc.Verb, pattern)); err != nil {
+							log.Println(err.Error())
+						}
+					}
+				})
+			})
 		}
 	}()
 

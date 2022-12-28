@@ -29,11 +29,13 @@ type DB interface {
 
 	// General
 	GetObject(owner, name string) (*Object, error)
+	GetObjectByID(ID int) (*Object, error)
 
 	// Defaults
 	Ensure() error
 
 	// Presence
+	SessionIDForAvatar(Object) (string, error)
 	AvatarBySessionID(string) (*Object, error)
 	BedroomBySessionID(string) (*Object, error)
 	MoveInto(toMove Object, container Object) error
@@ -281,6 +283,26 @@ func (db *pgDB) EndSession(sid string) (err error) {
 	return
 }
 
+func (db *pgDB) SessionIDForAvatar(obj Object) (string, error) {
+	if !obj.Avatar {
+		return "", nil
+	}
+	fmt.Printf("%#v", obj)
+	ctx := context.Background()
+	stmt := `SELECT id FROM sessions WHERE account = $1`
+	var sid *string
+	err := db.pool.QueryRow(ctx, stmt, obj.OwnerID).Scan(&sid)
+	if err != nil {
+		return "", err
+	}
+
+	if sid == nil {
+		return "", nil
+	}
+
+	return *sid, nil
+}
+
 func (db *pgDB) AvatarBySessionID(sid string) (avatar *Object, err error) {
 	avatar = &Object{}
 
@@ -356,6 +378,18 @@ func (db *pgDB) Earshot(obj Object) ([]Object, error) {
 	}
 
 	return out, nil
+}
+
+func (db *pgDB) GetObjectByID(ID int) (*Object, error) {
+	ctx := context.Background()
+	obj := &Object{}
+	stmt := `
+		SELECT id, avatar, data, owner, script
+		FROM objects
+		WHERE id = $1`
+	err := db.pool.QueryRow(ctx, stmt, ID).Scan(
+		&obj.ID, &obj.Avatar, &obj.Data, &obj.OwnerID, &obj.Script)
+	return obj, err
 }
 
 func (db *pgDB) GetObject(owner, name string) (obj *Object, err error) {

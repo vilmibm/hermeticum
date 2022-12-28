@@ -104,14 +104,35 @@ func newServer() (*gameWorldServer, error) {
 }
 
 func (s *gameWorldServer) verbHandler(verb, rest string, sender, target db.Object) error {
-	// I think i should rethink this. sc should maybe be permanent and then they re-create LStates
 	s.scriptsMutex.RLock()
 	sc, ok := s.scripts[target.ID]
 	s.scriptsMutex.RUnlock()
 	var err error
 
+	sid, _ := s.db.SessionIDForAvatar(target)
+	tell := func(_ int, _ string) {}
+	if sid != "" {
+		send := s.msgRouter[sid]
+		tell = func(senderID int, msg string) {
+			senderName := "a mysterious stranger"
+
+			sender, err := s.db.GetObjectByID(senderID)
+			if err == nil {
+				senderName = sender.Data["name"]
+			}
+
+			cm := proto.ClientMessage{
+				Type:    proto.ClientMessage_OVERHEARD,
+				Text:    msg,
+				Speaker: &senderName,
+			}
+
+			send(&cm)
+		}
+	}
+
 	if !ok {
-		sc, err = witch.NewScriptContext()
+		sc, err = witch.NewScriptContext(tell)
 		if err != nil {
 			return err
 		}
