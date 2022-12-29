@@ -110,32 +110,44 @@ func (s *gameWorldServer) verbHandler(verb, rest string, sender, target db.Objec
 	var err error
 
 	sid, _ := s.db.SessionIDForAvatar(target)
-	tell := func(_ int, _ string) {}
+	serverAPI := witch.ServerAPI{
+		Show: func(_ int, _ string) {},
+		Tell: func(_ int, _ string) {},
+	}
 	if sid != "" {
 		send := s.msgRouter[sid]
-		tell = func(senderID int, msg string) {
+		getSenderName := func(senderID int) *string {
 			senderName := "a mysterious stranger"
 
 			sender, err := s.db.GetObjectByID(senderID)
 			if err == nil {
-				log.Printf("%#v", sender)
 				senderName = sender.Data["name"]
 			} else {
 				log.Println(err.Error())
 			}
 
+			return &senderName
+		}
+		serverAPI.Show = func(senderID int, msg string) {
+			cm := proto.ClientMessage{
+				Type:    proto.ClientMessage_EMOTE,
+				Text:    msg,
+				Speaker: getSenderName(senderID),
+			}
+			send(&cm)
+		}
+		serverAPI.Tell = func(senderID int, msg string) {
 			cm := proto.ClientMessage{
 				Type:    proto.ClientMessage_OVERHEARD,
 				Text:    msg,
-				Speaker: &senderName,
+				Speaker: getSenderName(senderID),
 			}
-
 			send(&cm)
 		}
 	}
 
 	if !ok {
-		sc, err = witch.NewScriptContext(tell)
+		sc, err = witch.NewScriptContext(serverAPI)
 		if err != nil {
 			return err
 		}
@@ -160,26 +172,6 @@ func (s *gameWorldServer) verbHandler(verb, rest string, sender, target db.Objec
 func (s *gameWorldServer) HandleCmd(verb, rest string, sender *db.Object) {
 	// TODO
 }
-
-/*
-	what's the flow for when i'm at a computer and type /say hi ?
-
-	- server gets "SAY hi" from vilmibm
-	- server gets all objects in earshot (including vilmibm's avatar)
-	- for each object:
-		- call whatever handler it has for "hears"
-
-	and then that's it, right? over in witch land:
-
-	- hears handler for an avatar has:
-
-			tellMe(sender.get("name") + " says " + msg)
-
-	- tellMe somehow calls a method on the gameWorldServer that can look up a
-		session ID and thus use the msgRouter to send a message. I'm going to sleep
-		on this so I can think about the right way to structure those dependencies.
-
-*/
 
 func (s *gameWorldServer) Commands(stream proto.GameWorld_CommandsServer) error {
 	var sid string
@@ -220,42 +212,6 @@ func (s *gameWorldServer) Commands(stream proto.GameWorld_CommandsServer) error 
 		}
 
 		//s.HandleCmd(cmd.Verb, cmd.Rest, avatar)
-
-		/*
-
-			switch cmd.Verb {
-			case "say":
-				if err = s.HandleSay(avatar, cmd.Rest); err != nil {
-					s.HandleError(func(_ *proto.ClientMessage) error { return nil }, err)
-				}
-			default:
-				msg := &proto.ClientMessage{
-					Type: proto.ClientMessage_WHISPER,
-					Text: fmt.Sprintf("unknown verb: %s", cmd.Verb),
-				}
-				if err = send(msg); err != nil {
-					s.HandleError(send, err)
-				}
-			}
-
-		*/
-
-		/*
-
-			msg := &proto.ClientMessage{
-				Type: proto.ClientMessage_OVERHEARD,
-				Text: fmt.Sprintf("%s sent command %s with args %s",
-					sid, cmd.Verb, cmd.Rest),
-			}
-
-			speaker := "ECHO"
-			msg.Speaker = &speaker
-
-			err = send(msg)
-			if err != nil {
-				log.Printf("failed to send %v to %s: %s", msg, sid, err)
-			}
-		*/
 	}
 }
 

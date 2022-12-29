@@ -184,6 +184,10 @@ func (db *pgDB) createAccount(account *Account) (err error) {
 hears(".*", function()
 	tellMe(msg)
 end)
+
+sees(".*", function()
+	showMe(msg)
+end)
 `, hasInvocation(av))
 
 	stmt = "INSERT INTO objects ( avatar, data, owner, script ) VALUES ( $1, $2, $3, $4 ) RETURNING id"

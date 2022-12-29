@@ -23,6 +23,11 @@ end)
 `
 */
 
+type ServerAPI struct {
+	Tell func(int, string)
+	Show func(int, string)
+}
+
 type VerbContext struct {
 	Verb   string
 	Rest   string
@@ -31,14 +36,14 @@ type VerbContext struct {
 }
 
 type ScriptContext struct {
-	script   string
-	incoming chan VerbContext
-	tell     func(int, string)
+	script    string
+	incoming  chan VerbContext
+	serverAPI ServerAPI
 }
 
-func NewScriptContext(tell func(int, string)) (*ScriptContext, error) {
+func NewScriptContext(sAPI ServerAPI) (*ScriptContext, error) {
 	sc := &ScriptContext{
-		tell: tell,
+		serverAPI: sAPI,
 	}
 	sc.incoming = make(chan VerbContext)
 
@@ -53,6 +58,7 @@ func NewScriptContext(tell func(int, string)) (*ScriptContext, error) {
 				l = lua.NewState()
 				l.SetGlobal("has", l.NewFunction(witchHas))
 				l.SetGlobal("hears", l.NewFunction(witchHears))
+				l.SetGlobal("sees", l.NewFunction(witchSees))
 				l.SetGlobal("_handlers", l.NewTable())
 				if err := l.DoString(vc.Target.Script); err != nil {
 					log.Printf("error parsing script %s: %s", vc.Target.Script, err.Error())
@@ -60,17 +66,22 @@ func NewScriptContext(tell func(int, string)) (*ScriptContext, error) {
 			}
 
 			l.SetGlobal("tellMe", l.NewFunction(func(l *lua.LState) int {
-				// TODO not getting senderID properly here
 				sender := l.GetGlobal("sender").(*lua.LTable)
 				senderID := int(lua.LVAsNumber(sender.RawGetString("ID")))
-				msg := l.ToString(1)
-				log.Printf("%#v %s\n", sender, msg)
-				log.Println(senderID)
-				sc.tell(senderID, msg)
+				sc.serverAPI.Tell(senderID, l.ToString(1))
+				return 0
+			}))
+
+			l.SetGlobal("showMe", l.NewFunction(func(l *lua.LState) int {
+				log.Println("showMe called")
+				sender := l.GetGlobal("sender").(*lua.LTable)
+				senderID := int(lua.LVAsNumber(sender.RawGetString("ID")))
+				sc.serverAPI.Show(senderID, l.ToString(1))
 				return 0
 			}))
 
 			// TODO check execute permission and bail out potentially
+			log.Printf("%#v", vc)
 
 			senderT := l.NewTable()
 			senderT.RawSetString("name", lua.LString(vc.Sender.Data["name"]))
@@ -103,6 +114,5 @@ func NewScriptContext(tell func(int, string)) (*ScriptContext, error) {
 }
 
 func (sc *ScriptContext) Handle(vc VerbContext) {
-	log.Printf("%#v %#v", sc, vc)
 	sc.incoming <- vc
 }

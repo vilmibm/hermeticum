@@ -60,6 +60,7 @@ func (cs *ClientState) HandleInput(input string) error {
 	var verb string
 	rest := input
 	if strings.HasPrefix(input, "/") {
+		// TODO this is def broken lol
 		input = input[1:]
 		parts := strings.SplitN(input, " ", 1)
 		verb = parts[0]
@@ -105,7 +106,14 @@ func (cs *ClientState) AddMessage(msg *proto.ClientMessage) {
 	// TODO look into using the SetChangedFunc thing.
 	cs.App.QueueUpdateDraw(func() {
 		// TODO trim content of messagesView /or/ see if tview has a buffer size that does it for me. use cs.messages to re-constitute.
-		fmt.Fprintf(cs.messagesView, "%s: %s\n", msg.GetSpeaker(), msg.GetText())
+		switch msg.Type {
+		case proto.ClientMessage_OVERHEARD:
+			fmt.Fprintf(cs.messagesView, "%s: %s\n", msg.GetSpeaker(), msg.GetText())
+		case proto.ClientMessage_EMOTE:
+			fmt.Fprintf(cs.messagesView, "%s %s\n", msg.GetSpeaker(), msg.GetText())
+		default:
+			fmt.Fprintf(cs.messagesView, "%#v\n", msg)
+		}
 		cs.messagesView.ScrollToEnd()
 	})
 }
