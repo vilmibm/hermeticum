@@ -10,29 +10,6 @@ import (
 )
 
 /*
-
-	the purpose of this package is to provide abstractions for sending verbs to game objects.
-
-	Game objects get pulled from the DB into memory and their scripts become Lua States.
-
-*/
-
-// TODO using a dummy script for now
-
-const dummyScript = `
-has({
-	name = "spaghetti",
-	description = "a plate of pasta covered in pomodoro sauce"
-})
-
-hears(".*", function()
-	print(sender.name)
-	print(msg)
-	tellMe(msg)
-end)
-`
-
-/*
 allows({
   read = "world",
   write = "owner"
@@ -40,7 +17,7 @@ allows({
   execute = "world",
 })
 
-hears(".*eat.*", function(msg)
+hears(".*eat.*", function()
   does("quivers nervously")
 end)
 `
@@ -71,34 +48,33 @@ func NewScriptContext(tell func(int, string)) (*ScriptContext, error) {
 		var vc VerbContext
 		for {
 			vc = <-sc.incoming
-			//if vc.Target.Script != sc.script {
-			if dummyScript != sc.script {
-				//sc.script = vc.Target.Script
-				sc.script = dummyScript
+			if vc.Target.Script != sc.script {
+				sc.script = vc.Target.Script
 				l = lua.NewState()
 				l.SetGlobal("has", l.NewFunction(witchHas))
 				l.SetGlobal("hears", l.NewFunction(witchHears))
 				l.SetGlobal("_handlers", l.NewTable())
-				l.SetGlobal("tellMe", l.NewFunction(func(l *lua.LState) int {
-					sender := l.GetGlobal("sender").(*lua.LTable)
-					senderID := int(lua.LVAsNumber(sender.RawGetString("ID")))
-					msg := l.ToString(1)
-					log.Printf("%#v %s\n", sender, msg)
-					sc.tell(senderID, msg)
-					return 0
-				}))
-				// TODO other setup
-				//if err := l.DoString(obj.Script); err != nil {
-				if err = l.DoString(dummyScript); err != nil {
-					log.Printf("error parsing script %s: %s", dummyScript, err.Error())
+				if err := l.DoString(vc.Target.Script); err != nil {
+					log.Printf("error parsing script %s: %s", vc.Target.Script, err.Error())
 				}
 			}
+
+			l.SetGlobal("tellMe", l.NewFunction(func(l *lua.LState) int {
+				// TODO not getting senderID properly here
+				sender := l.GetGlobal("sender").(*lua.LTable)
+				senderID := int(lua.LVAsNumber(sender.RawGetString("ID")))
+				msg := l.ToString(1)
+				log.Printf("%#v %s\n", sender, msg)
+				log.Println(senderID)
+				sc.tell(senderID, msg)
+				return 0
+			}))
 
 			// TODO check execute permission and bail out potentially
 
 			senderT := l.NewTable()
 			senderT.RawSetString("name", lua.LString(vc.Sender.Data["name"]))
-			senderT.RawSetString("ID", lua.LString(vc.Sender.Data["ID"]))
+			senderT.RawSetString("ID", lua.LNumber(vc.Sender.ID))
 			l.SetGlobal("sender", senderT)
 			l.SetGlobal("msg", lua.LString(vc.Rest))
 

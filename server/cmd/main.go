@@ -118,7 +118,10 @@ func (s *gameWorldServer) verbHandler(verb, rest string, sender, target db.Objec
 
 			sender, err := s.db.GetObjectByID(senderID)
 			if err == nil {
+				log.Printf("%#v", sender)
 				senderName = sender.Data["name"]
+			} else {
+				log.Println(err.Error())
 			}
 
 			cm := proto.ClientMessage{

@@ -180,6 +180,12 @@ func (db *pgDB) createAccount(account *Account) (err error) {
 		Script: "",
 	}
 
+	av.Script = fmt.Sprintf(`%s
+hears(".*", function()
+	tellMe(msg)
+end)
+`, hasInvocation(av))
+
 	stmt = "INSERT INTO objects ( avatar, data, owner, script ) VALUES ( $1, $2, $3, $4 ) RETURNING id"
 	err = tx.QueryRow(ctx, stmt, av.Avatar, av.Data, account.ID, av.Script).Scan(&av.ID)
 	if err != nil {
@@ -392,13 +398,14 @@ func (db *pgDB) GetObjectByID(ID int) (*Object, error) {
 	return obj, err
 }
 
+// TODO fix arg
 func (db *pgDB) GetObject(owner, name string) (obj *Object, err error) {
 	ctx := context.Background()
 	obj = &Object{}
 	stmt := `
 		SELECT id, avatar, data, owner, script
 		FROM objects
-		WHERE owner = $1 AND data['name'] = $2`
+		WHERE owner = (SELECT id FROM accounts WHERE name=$1) AND data['name'] = $2`
 	err = db.pool.QueryRow(ctx, stmt, owner, fmt.Sprintf(`"%s"`, name)).Scan(
 		&obj.ID, &obj.Avatar, &obj.Data, &obj.OwnerID, &obj.Script)
 
@@ -447,6 +454,16 @@ func (db *pgDB) ClearSessions() (err error) {
 	return
 }
 
+func hasInvocation(obj *Object) string {
+	hi := "has({\n"
+	for k, v := range obj.Data {
+		hi += fmt.Sprintf(`%s = "%s",`, k, v) + "\n"
+	}
+	hi += "})"
+
+	return hi
+}
+
 func (db *pgDB) CreateObject(owner *Account, obj *Object) error {
 	ctx := context.Background()
 	stmt := `
@@ -454,6 +471,8 @@ func (db *pgDB) CreateObject(owner *Account, obj *Object) error {
 		VALUES ( $1, $2, $3, $4, $5)
 		RETURNING id
 	`
+
+	obj.Script = hasInvocation(obj)
 
 	err := db.pool.QueryRow(ctx, stmt,
 		obj.Avatar, obj.Bedroom, obj.Data, obj.Script, owner.ID).Scan(

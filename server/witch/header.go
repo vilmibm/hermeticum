@@ -1,33 +1,10 @@
 package witch
 
 import (
-	"fmt"
 	"log"
 
-	"github.com/vilmibm/hermeticum/server/db"
 	lua "github.com/yuin/gopher-lua"
 )
-
-const DefaultAvatarScript = `
-	has({
-		name = 
-	})
-`
-
-func SetDefaultAvatarScript(obj *db.Object) {
-	hasInvocation := "has({\n"
-	for k, v := range obj.Data {
-		hasInvocation += fmt.Sprintf(`%s = "%s"\n`, k, v)
-	}
-	hasInvocation += "})"
-
-	obj.Script = fmt.Sprintf(`%s
-hears(".*", function() 
-	tellMe(sender, msg)
-end)
-`, hasInvocation)
-
-}
 
 func witchHas(l *lua.LState) int {
 	lv := l.ToTable(1)
