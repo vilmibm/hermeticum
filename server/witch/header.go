@@ -1,15 +1,15 @@
 package witch
 
 import (
-	"log"
-
 	lua "github.com/yuin/gopher-lua"
 )
 
 func witchHas(l *lua.LState) int {
-	lv := l.ToTable(1)
-	log.Println(lv)
 	// TODO
+	/*
+		lv := l.ToTable(1)
+		log.Println(lv)
+	*/
 	return 0
 }
 
@@ -20,7 +20,6 @@ func witchHears(l *lua.LState) int {
 }
 
 func witchSees(l *lua.LState) int {
-	log.Println("adding handler for emote")
 	return addHandler(l, "emote")
 }
 

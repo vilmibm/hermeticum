@@ -73,7 +73,6 @@ func NewScriptContext(sAPI ServerAPI) (*ScriptContext, error) {
 			}))
 
 			l.SetGlobal("showMe", l.NewFunction(func(l *lua.LState) int {
-				log.Println("showMe called")
 				sender := l.GetGlobal("sender").(*lua.LTable)
 				senderID := int(lua.LVAsNumber(sender.RawGetString("ID")))
 				sc.serverAPI.Show(senderID, l.ToString(1))
@@ -114,6 +113,5 @@ func NewScriptContext(sAPI ServerAPI) (*ScriptContext, error) {
 }
 
 func (sc *ScriptContext) Handle(vc VerbContext) {
-	log.Printf("%#v", sc)
 	sc.incoming <- vc
 }

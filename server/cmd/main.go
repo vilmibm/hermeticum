@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -145,8 +144,7 @@ func (s *gameWorldServer) verbHandler(verb, rest string, sender, target db.Objec
 	}
 
 	if !ok || sc == nil {
-		sc, err = witch.NewScriptContext(serverAPI)
-		if err != nil {
+		if sc, err = witch.NewScriptContext(serverAPI); err != nil {
 			return err
 		}
 
@@ -171,31 +169,26 @@ func (s *gameWorldServer) HandleCmd(verb, rest string, sender *db.Object) {
 	// TODO
 }
 
-func (s *gameWorldServer) endSession(sid string) error {
+func (s *gameWorldServer) endSession(sid string) {
+	var err error
+	var avatar *db.Object
 	log.Printf("ending session %s", sid)
 
-	errors := []string{}
-	err := s.db.EndSession(sid)
+	avatar, err = s.db.AvatarBySessionID(sid)
 	if err != nil {
-		errors = append(errors, err.Error())
-	}
-
-	s.msgRouter[sid] = nil
-
-	avatar, err := s.db.AvatarBySessionID(sid)
-	if err != nil {
-		errors = append(errors, err.Error())
+		log.Printf("error while ending session %s: %s", sid, err.Error())
 	} else {
 		s.scriptsMutex.Lock()
-		s.scripts[avatar.ID] = nil
+		delete(s.scripts, avatar.ID)
 		s.scriptsMutex.Unlock()
 	}
 
-	if len(errors) > 0 {
-		return fmt.Errorf("error(s) encountered trying to end session %s: %v", sid, errors)
+	if err = s.db.EndSession(sid); err != nil {
+		log.Printf("error while ending session %s: %s", sid, err.Error())
 	}
 
-	return nil
+	delete(s.msgRouter, sid)
+
 }
 
 func (s *gameWorldServer) Commands(stream proto.GameWorld_CommandsServer) error {
@@ -217,16 +210,15 @@ func (s *gameWorldServer) Commands(stream proto.GameWorld_CommandsServer) error 
 			defer s.endSession(sid)
 		}
 
-		err = stream.Send(&proto.CommandAck{
+		if err = stream.Send(&proto.CommandAck{
 			Acked: true,
-		})
-
-		if err != nil {
+		}); err != nil {
 			log.Printf("unable to ack command in session %s", sid)
 			return err
 		}
 
 		if send == nil {
+			log.Printf("saving a send fn for session %s", sid)
 			send = s.msgRouter[sid]
 		}
 
@@ -272,8 +264,6 @@ func (s *gameWorldServer) Messages(si *proto.SessionInfo, stream proto.GameWorld
 	}
 }
 
-// TODO make sure the Foyer is created as part of initial setup / migration
-
 func (s *gameWorldServer) Register(ctx context.Context, auth *proto.AuthInfo) (si *proto.SessionInfo, err error) {
 	var account *db.Account
 	account, err = s.db.CreateAccount(auth.Username, auth.Password)
@@ -292,18 +282,6 @@ func (s *gameWorldServer) Register(ctx context.Context, auth *proto.AuthInfo) (s
 	if err != nil {
 		return nil, fmt.Errorf("failed to find avatar for %s: %w", sessionID, err)
 	}
-
-	/*
-		bedroom, err := s.db.BedroomBySessionID(sessionID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to find bedroom for %s: %w", sessionID, err)
-		}
-
-		err = s.db.MoveInto(*av, *bedroom)
-		if err != nil {
-			return nil, fmt.Errorf("failed to move %d into %d: %w", av.ID, bedroom.ID, err)
-		}
-	*/
 
 	foyer, err := s.db.GetObject("system", "foyer")
 	if err != nil {
@@ -339,75 +317,18 @@ func (s *gameWorldServer) Login(ctx context.Context, auth *proto.AuthInfo) (si *
 		return nil, fmt.Errorf("failed to find avatar for %s: %w", sessionID, err)
 	}
 
-	bedroom, err := s.db.BedroomBySessionID(sessionID)
+	foyer, err := s.db.GetObject("system", "foyer")
 	if err != nil {
-		return nil, fmt.Errorf("failed to find bedroom for %s: %w", sessionID, err)
+		return nil, fmt.Errorf("failed to find foyer: %w", err)
 	}
 
-	err = s.db.MoveInto(*av, *bedroom)
-	if err != nil {
-		return nil, fmt.Errorf("failed to move %d into %d: %w", av.ID, bedroom.ID, err)
+	if err = s.db.MoveInto(*av, *foyer); err != nil {
+		return nil, fmt.Errorf("failed to move %d into %d: %w", av.ID, foyer.ID, err)
 	}
 
 	si = &proto.SessionInfo{SessionID: sessionID}
 
 	return
-}
-
-func (s *gameWorldServer) HandleSay(sender *db.Object, msg string) error {
-	name := sender.Data["name"]
-	if name == "" {
-		// TODO determine this based on a hash or something
-		name = "a mysterious figure"
-	}
-
-	heard, err := s.db.Earshot(*sender)
-	if err != nil {
-		log.Println(err.Error())
-		return err
-	}
-
-	log.Printf("found %#v in earshot of %#v\n", heard, sender)
-
-	as, err := s.db.ActiveSessions()
-	if err != nil {
-		return err
-	}
-
-	sendErrs := []error{}
-
-	// TODO figure out pointer shit
-
-	for _, h := range heard {
-		s.verbHandler("hears", msg, *sender, h)
-		// TODO once we have a script engine, deliver the HEARS event
-		for _, sess := range as {
-			if sess.AccountID == h.OwnerID {
-				cm := proto.ClientMessage{
-					Type:    proto.ClientMessage_OVERHEARD,
-					Text:    msg,
-					Speaker: &name,
-				}
-				err = s.msgRouter[sess.ID](&cm)
-				if err != nil {
-					sendErrs = append(sendErrs, err)
-				}
-			}
-		}
-	}
-
-	if len(sendErrs) > 0 {
-		errMsg := "send errors: "
-		for i, err := range sendErrs {
-			errMsg += err.Error()
-			if i < len(sendErrs)-1 {
-				errMsg += ", "
-			}
-		}
-		return errors.New(errMsg)
-	}
-
-	return nil
 }
 
 func (s *gameWorldServer) HandleError(send func(*proto.ClientMessage) error, err error) error {
