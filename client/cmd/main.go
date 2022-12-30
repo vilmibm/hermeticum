@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
+	"os/signal"
 	"strings"
 	"time"
 
@@ -56,6 +58,25 @@ func (cs *ClientState) Messages() error {
 	return nil
 }
 
+func (cs *ClientState) HandleSIGINT(sigC chan os.Signal) {
+	for range sigC {
+		cm := &proto.Command{
+			SessionInfo: cs.SessionInfo,
+			Verb:        "quit",
+		}
+		err := cs.cmdStream.Send(cm)
+		if err != nil {
+			fmt.Printf("failed to send quit verb to server: %s\n", err.Error())
+		}
+		_, err = cs.cmdStream.Recv()
+		if err != nil {
+			fmt.Printf("failed to receive an ACK from server: %s\n", err.Error())
+		}
+
+		cs.App.Stop()
+	}
+}
+
 func (cs *ClientState) HandleInput(input string) error {
 	var verb string
 	rest := input
@@ -73,6 +94,10 @@ func (cs *ClientState) HandleInput(input string) error {
 	err := cs.cmdStream.Send(cmd)
 	if err != nil {
 		return err
+	}
+	_, err = cs.cmdStream.Recv()
+	if err != nil {
+		fmt.Printf("failed to receive an ACK from server: %s\n", err.Error())
 	}
 	if verb == "quit" || verb == "q" {
 		cs.App.Stop()
@@ -158,12 +183,9 @@ func _main() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	pong, err := cs.Client.Ping(ctx, cs.SessionInfo)
-	if err != nil {
+	if _, err = cs.Client.Ping(ctx, cs.SessionInfo); err != nil {
 		log.Fatalf("%v.Ping -> %v", cs.Client, err)
 	}
-
-	log.Printf("%#v", pong)
 
 	pages := tview.NewPages()
 
@@ -202,6 +224,9 @@ func _main() error {
 
 	pages.AddPage("main", mainPage, true, false)
 
+	sigC := make(chan os.Signal, 1)
+	signal.Notify(sigC, os.Interrupt)
+
 	lunfi := tview.NewInputField().SetLabel("account name")
 	lpwfi := tview.NewInputField().SetLabel("password").SetMaskCharacter('~')
 
@@ -225,6 +250,7 @@ func _main() error {
 
 		pages.SwitchToPage("game")
 		app.SetFocus(commandInput)
+		go cs.HandleSIGINT(sigC)
 		// TODO error handle
 		go cs.Messages()
 	}
@@ -260,6 +286,7 @@ func _main() error {
 
 		pages.SwitchToPage("game")
 		app.SetFocus(commandInput)
+		go cs.HandleSIGINT(sigC)
 		// TODO error handle
 		go cs.Messages()
 	}

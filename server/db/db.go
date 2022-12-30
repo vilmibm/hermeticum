@@ -297,12 +297,11 @@ func (db *pgDB) SessionIDForAvatar(obj Object) (string, error) {
 	if !obj.Avatar {
 		return "", nil
 	}
-	fmt.Printf("%#v", obj)
 	ctx := context.Background()
 	stmt := `SELECT id FROM sessions WHERE account = $1`
 	var sid *string
-	err := db.pool.QueryRow(ctx, stmt, obj.OwnerID).Scan(&sid)
-	if err != nil {
+	var err error
+	if err = db.pool.QueryRow(ctx, stmt, obj.OwnerID).Scan(&sid); err != nil {
 		return "", err
 	}
 
@@ -315,7 +314,6 @@ func (db *pgDB) SessionIDForAvatar(obj Object) (string, error) {
 
 func (db *pgDB) AvatarBySessionID(sid string) (avatar *Object, err error) {
 	avatar = &Object{}
-
 	// TODO subquery
 	stmt := `
 	SELECT id, avatar, data, owner, script

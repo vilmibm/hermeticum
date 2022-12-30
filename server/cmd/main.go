@@ -5,7 +5,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"sync"
@@ -37,7 +36,6 @@ func _main() (err error) {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("DBG %#v\n", l)
 
 	var opts []grpc.ServerOption
 	if *tls {
@@ -146,7 +144,7 @@ func (s *gameWorldServer) verbHandler(verb, rest string, sender, target db.Objec
 		}
 	}
 
-	if !ok {
+	if !ok || sc == nil {
 		sc, err = witch.NewScriptContext(serverAPI)
 		if err != nil {
 			return err
@@ -173,42 +171,83 @@ func (s *gameWorldServer) HandleCmd(verb, rest string, sender *db.Object) {
 	// TODO
 }
 
+func (s *gameWorldServer) endSession(sid string) error {
+	log.Printf("ending session %s", sid)
+
+	errors := []string{}
+	err := s.db.EndSession(sid)
+	if err != nil {
+		errors = append(errors, err.Error())
+	}
+
+	s.msgRouter[sid] = nil
+
+	avatar, err := s.db.AvatarBySessionID(sid)
+	if err != nil {
+		errors = append(errors, err.Error())
+	} else {
+		s.scriptsMutex.Lock()
+		s.scripts[avatar.ID] = nil
+		s.scriptsMutex.Unlock()
+	}
+
+	if len(errors) > 0 {
+		return fmt.Errorf("error(s) encountered trying to end session %s: %v", sid, errors)
+	}
+
+	return nil
+}
+
 func (s *gameWorldServer) Commands(stream proto.GameWorld_CommandsServer) error {
 	var sid string
+	var cmd *proto.Command
+	var err error
+	var avatar *db.Object
+	var send func(*proto.ClientMessage) error
+	var affected []db.Object
+	var o db.Object
 	for {
-		cmd, err := stream.Recv()
-		if err == io.EOF {
-			// TODO this doesn't really do anything. if a client
-			// disconnects without warning there's no EOF.
-			return s.db.EndSession(sid)
-		}
-		if err != nil {
+		if cmd, err = stream.Recv(); err != nil {
+			log.Printf("commands stream closed with error: %s", err.Error())
 			return err
 		}
 
-		sid = cmd.SessionInfo.SessionID
-
-		log.Printf("verb %s in session %s", cmd.Verb, sid)
-
-		if cmd.Verb == "quit" || cmd.Verb == "q" {
-			s.msgRouter[sid] = nil
-			log.Printf("ending session %s", sid)
-			return s.db.EndSession(sid)
+		if sid == "" {
+			sid = cmd.SessionInfo.SessionID
+			defer s.endSession(sid)
 		}
-		send := s.msgRouter[sid]
 
-		// TODO what is the implication of returning an error from this function?
+		err = stream.Send(&proto.CommandAck{
+			Acked: true,
+		})
 
-		avatar, err := s.db.AvatarBySessionID(sid)
 		if err != nil {
+			log.Printf("unable to ack command in session %s", sid)
+			return err
+		}
+
+		if send == nil {
+			send = s.msgRouter[sid]
+		}
+
+		if avatar, err = s.db.AvatarBySessionID(sid); err != nil {
 			return s.HandleError(send, err)
 		}
-		log.Printf("found avatar %#v", avatar)
 
-		affected, err := s.db.Earshot(*avatar)
+		log.Printf("verb %s from avatar %d in session %s", cmd.Verb, avatar.ID, sid)
 
-		for _, o := range affected {
-			err = s.verbHandler(cmd.Verb, cmd.Rest, *avatar, o)
+		if cmd.Verb == "quit" || cmd.Verb == "q" {
+			return nil
+		}
+
+		if affected, err = s.db.Earshot(*avatar); err != nil {
+			return s.HandleError(send, err)
+		}
+
+		for _, o = range affected {
+			if err = s.verbHandler(cmd.Verb, cmd.Rest, *avatar, o); err != nil {
+				log.Printf("error handling verb %s for object %d: %s", cmd.Verb, o.ID, err)
+			}
 		}
 
 		//s.HandleCmd(cmd.Verb, cmd.Rest, avatar)
@@ -387,7 +426,6 @@ func (s *gameWorldServer) HandleError(send func(*proto.ClientMessage) error, err
 // TODO other server functions
 
 func main() {
-	// TODO at some point during startup clear out sessions
 	err := _main()
 	if err != nil {
 		log.Fatal(err.Error())

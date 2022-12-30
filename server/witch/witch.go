@@ -114,5 +114,6 @@ func NewScriptContext(sAPI ServerAPI) (*ScriptContext, error) {
 }
 
 func (sc *ScriptContext) Handle(vc VerbContext) {
+	log.Printf("%#v", sc)
 	sc.incoming <- vc
 }
