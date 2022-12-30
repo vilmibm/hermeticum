@@ -60,13 +60,7 @@ func (cs *ClientState) HandleInput(input string) error {
 	var verb string
 	rest := input
 	if strings.HasPrefix(input, "/") {
-		// TODO this is def broken lol
-		input = input[1:]
-		parts := strings.SplitN(input, " ", 1)
-		verb = parts[0]
-		if len(parts) > 1 {
-			rest = parts[1]
-		}
+		verb, rest, _ = strings.Cut(input[1:], " ")
 	} else {
 		verb = "say"
 	}
