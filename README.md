@@ -12,16 +12,23 @@ the alpha version of tildemush does work! you can script objects and make rooms 
 - has memory leaks
 - consists of very poorly abstracted spaghetti code
 - has a half-implemented client
-- is extremely hard to add to (I gave up trying to do scheduled tasks)
+- is extremely hard to add to
 - has a very brittle, very fragile, 100% hacks scripting language for game objects
 - has a very inelegant and inefficient system for handling revisions to game objects code
 
 I feel very strongly that a total rewrite is necessary. I also feel very strongly that Go is a better choice for this kind of application than Python.
 
-## new technical stuff
+## new stuff from tildemush
 
 - API is grpc/protobuff based
-- client uses `tview` which I find more pleasant to work with that `urwid`
+- client uses `tview` which I find more pleasant to work with than `urwid`
+- WITCH is powered by https://github.com/yuin/gopher-lua
+- a much simpler approach to script editing
+  - I'm going to take a much simpler approach to scripts than I did in tildemush: objects just get one text column for their script with no revision tracking.
+  - this can totally change in the future but I don't think it's necessary for a beta
+- "cron" system: WITCH scripts will respond to a "tick" event and decide if enough time has passed for them to re-call their callback.
+- "global chat" since it is my hope that hermeticum can largely supercede IRC on https://tilde.town , I intend to have an always available global chat in a pane in the client so users can feel like a part of a "main" while still wandering around and exploring rooms.
+- "loudness" system. this is not fully designed yet, but events should be "audible" in a regressed way for objects that are contained by things contained in a room where a verb is executed.
 
 ## the name though
 
@@ -34,4 +41,7 @@ wisdom. I like the idea of mapping these mental spaces into a computer.
 
 I haven't moved over any design docs or notes or anything like that. Refer to the tildemush repo for that kind of stuff.
 
-to regenerate the API code: `protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative proto/hermeticum.proto`
+## development
+
+- to regenerate the API code: `protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative proto/hermeticum.proto`
+- database connection currently hardcoded to a postgresql database called `hermeticum` owned by `vilmibm` who has pw `vilmibm`. if you want to hack on this locally, update the call to `NewDB` accordingly. Eventually this will be handled via environment variables.
