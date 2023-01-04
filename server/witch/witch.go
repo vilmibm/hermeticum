@@ -54,11 +54,13 @@ func NewScriptContext(sAPI ServerAPI) (*ScriptContext, error) {
 		for {
 			vc = <-sc.incoming
 			if vc.Target.Script != sc.script {
+				// TODO clear this object out of the exits table
 				sc.script = vc.Target.Script
 				l = lua.NewState()
 				l.SetGlobal("has", l.NewFunction(witchHas))
 				l.SetGlobal("hears", l.NewFunction(witchHears))
 				l.SetGlobal("sees", l.NewFunction(witchSees))
+				l.SetGlobal("go", l.NewFunction(witchGo))
 				l.SetGlobal("_handlers", l.NewTable())
 				if err := l.DoString(vc.Target.Script); err != nil {
 					log.Printf("error parsing script %s: %s", vc.Target.Script, err.Error())
@@ -69,6 +71,12 @@ func NewScriptContext(sAPI ServerAPI) (*ScriptContext, error) {
 				sender := l.GetGlobal("sender").(*lua.LTable)
 				senderID := int(lua.LVAsNumber(sender.RawGetString("ID")))
 				sc.serverAPI.Tell(senderID, l.ToString(1))
+				return 0
+			}))
+
+			l.SetGlobal("moveSender", l.NewFunction(func(l *lua.LState) int {
+				// TODO get sender
+				// TODO add another func to serverAPI for moving an object
 				return 0
 			}))
 

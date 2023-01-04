@@ -23,6 +23,13 @@ func witchSees(l *lua.LState) int {
 	return addHandler(l, "emote")
 }
 
+func witchGo(l *lua.LState) int {
+	// TODO get the handler map
+	// - check if handler map has a Go handler already, exit early if so
+	// TODO register this object as an exit in DB
+	return addHandler(l, "go")
+}
+
 func witchDoes(ls *lua.LState) int {
 	// TODO how to feed events back into the server?
 	// it needs to behave like an event showing up in Commands stream

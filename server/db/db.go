@@ -125,6 +125,42 @@ func (db *pgDB) Ensure() error {
 		}
 	}
 
+	pub, err := db.GetObject("system", "pub")
+	if err != nil {
+		// TODO actually check error. for now assuming it means does not exist
+		data := map[string]string{}
+		data["name"] = "pub"
+		data["description"] = "a warm pub constructed of hard wood and brass"
+		pub = &Object{
+			Data:   data,
+			Script: "",
+			// TODO default room script
+		}
+		if err = db.CreateObject(sysAcc, pub); err != nil {
+			return err
+		}
+	}
+
+	oakDoor, err := db.GetObject("system", "oak door")
+	if err != nil {
+		// TODO actually check error. for now assuming it means does not exist
+		data := map[string]string{}
+		data["name"] = "oak door"
+		data["description"] = "a heavy oak door with a brass handle. an ornate sign says PUB."
+		oakDoor = &Object{
+			Data: data,
+			Script: `
+				go("north", function
+					tellMe("the heavy door swings forward with ease. It creaks gently")
+					moveSender("system", "pub")
+				end)
+			`,
+		}
+		if err = db.CreateObject(sysAcc, oakDoor); err != nil {
+			return err
+		}
+	}
+
 	sysAva, err := db.GetAccountAvatar(*sysAcc)
 	if err != nil {
 		return fmt.Errorf("could not find avatar for system account: %w", err)
@@ -132,6 +168,7 @@ func (db *pgDB) Ensure() error {
 
 	db.MoveInto(*sysAva, *foyer)
 	db.MoveInto(*egg, *foyer)
+	db.MoveInto(*oakDoor, *foyer)
 
 	return nil
 }
@@ -474,7 +511,7 @@ func (db *pgDB) CreateObject(owner *Account, obj *Object) error {
 		RETURNING id
 	`
 
-	obj.Script = hasInvocation(obj)
+	obj.Script = hasInvocation(obj) + obj.Script
 
 	err := db.pool.QueryRow(ctx, stmt,
 		obj.Avatar, obj.Bedroom, obj.Data, obj.Script, owner.ID).Scan(

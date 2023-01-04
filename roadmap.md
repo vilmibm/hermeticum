@@ -46,14 +46,16 @@ TODO draft something new
 - [x] grpc server
 - [x] session handling (opening/closing)
 - [x] verb handling
-- [x] WITCH: initial setup
+- [ ] build out some more default rooms
 - [x] DB: initial schema
 - [ ] DB: sundry error handling
-- [ ] build out some more default rooms
+- [ ] DB/WITCH: locking objects
+- [x] WITCH: initial setup
 - [ ] WITCH: ability to send verbs outward
 - [ ] WITCH: transitive verb support
 - [ ] WITCH: provides function
 - [ ] WITCH: movement stuff (teleport, move)
+- [ ] WITCH: bidirectional has() support
 - [ ] VERBS: create
 - [ ] VERBS: announce (for gods)
 - [ ] VERBS: movement
