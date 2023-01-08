@@ -73,6 +73,16 @@ func newServer() (*gameWorldServer, error) {
 		return nil, err
 	}
 
+	// TODO --reset flag
+	reset := flag.Bool("reset", false, "fully reset the database to its initial state")
+	flag.Parse()
+
+	if *reset {
+		if err = db.Erase(); err != nil {
+			return nil, fmt.Errorf("failed to reset database: %w", err)
+		}
+	}
+
 	if err = db.Ensure(); err != nil {
 		return nil, fmt.Errorf("failed to ensure default entities: %w", err)
 	}

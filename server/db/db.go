@@ -33,6 +33,7 @@ type DB interface {
 
 	// Defaults
 	Ensure() error
+	Erase() error
 
 	// Presence
 	SessionIDForAvatar(Object) (string, error)
@@ -77,6 +78,25 @@ func NewDB(connURL string) (DB, error) {
 	}
 
 	return pgdb, nil
+}
+
+// Erase fully destroys the database's contents, dropping all tables.
+func (db *pgDB) Erase() (err error) {
+	stmts := []string{
+		"DROP SCHEMA public CASCADE",
+		"CREATE SCHEMA public",
+		"GRANT ALL ON SCHEMA public TO postgres",
+		"GRANT ALL ON SCHEMA public TO public",
+		"COMMENT ON SCHEMA public IS 'standard public schema'",
+	}
+
+	for _, stmt := range stmts {
+		if _, err = db.pool.Exec(context.Background(), stmt); err != nil {
+			return
+		}
+	}
+
+	return nil
 }
 
 // Ensure checks for and then creates default resources if they do not exist (like the Foyer)
