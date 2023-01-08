@@ -26,6 +26,7 @@ end)
 type ServerAPI struct {
 	Tell func(int, string)
 	Show func(int, string)
+	DB   func() db.DB
 }
 
 type VerbContext struct {
@@ -61,6 +62,8 @@ func NewScriptContext(sAPI ServerAPI) (*ScriptContext, error) {
 				l.SetGlobal("hears", l.NewFunction(witchHears))
 				l.SetGlobal("sees", l.NewFunction(witchSees))
 				l.SetGlobal("go", l.NewFunction(witchGo))
+				l.SetGlobal("seen", l.NewFunction(witchSeen))
+				l.SetGlobal("my", l.NewFunction(witchMy))
 				l.SetGlobal("_handlers", l.NewTable())
 				if err := l.DoString(vc.Target.Script); err != nil {
 					log.Printf("error parsing script %s: %s", vc.Target.Script, err.Error())
@@ -74,10 +77,28 @@ func NewScriptContext(sAPI ServerAPI) (*ScriptContext, error) {
 				return 0
 			}))
 
-			l.SetGlobal("moveSender", l.NewFunction(func(l *lua.LState) int {
-				// TODO get sender
-				// TODO add another func to serverAPI for moving an object
-				return 0
+			l.SetGlobal("moveSender", l.NewFunction(func(l *lua.LState) (ret int) {
+				ret = 0
+				sender := l.GetGlobal("sender").(*lua.LTable)
+				senderID := int(lua.LVAsNumber(sender.RawGetString("ID")))
+				owner := l.ToString(1)
+				name := l.ToString(2)
+				db := sc.serverAPI.DB()
+				senderObj, err := db.GetObjectByID(senderID)
+				if err != nil {
+					log.Println(err.Error())
+					return
+				}
+				container, err := db.GetObject(owner, name)
+				if err != nil {
+					log.Println(err.Error())
+					return
+				}
+				if err = db.MoveInto(*senderObj, *container); err != nil {
+					log.Println(err.Error())
+				}
+
+				return
 			}))
 
 			l.SetGlobal("showMe", l.NewFunction(func(l *lua.LState) int {

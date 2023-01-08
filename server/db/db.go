@@ -113,6 +113,12 @@ func (db *pgDB) Ensure() error {
 		}
 	}
 
+	roomScript := `
+		seen(function()
+			tellSender(my("description"))
+		end)
+	`
+
 	foyer, err := db.GetObject("system", "foyer")
 	if err != nil {
 		// TODO actually check error. for now assuming it means does not exist
@@ -121,8 +127,7 @@ func (db *pgDB) Ensure() error {
 		data["description"] = "a big room. the ceiling is painted with constellations."
 		foyer = &Object{
 			Data:   data,
-			Script: "",
-			// TODO default room script
+			Script: roomScript,
 		}
 		if err = db.CreateObject(sysAcc, foyer); err != nil {
 			return err
@@ -138,7 +143,6 @@ func (db *pgDB) Ensure() error {
 		egg = &Object{
 			Data:   data,
 			Script: "",
-			// TODO default room script
 		}
 		if err = db.CreateObject(sysAcc, egg); err != nil {
 			return err
@@ -153,8 +157,7 @@ func (db *pgDB) Ensure() error {
 		data["description"] = "a warm pub constructed of hard wood and brass"
 		pub = &Object{
 			Data:   data,
-			Script: "",
-			// TODO default room script
+			Script: roomScript,
 		}
 		if err = db.CreateObject(sysAcc, pub); err != nil {
 			return err
@@ -170,7 +173,7 @@ func (db *pgDB) Ensure() error {
 		oakDoor = &Object{
 			Data: data,
 			Script: `
-				go("north", function
+				go("north", function()
 					tellMe("the heavy door swings forward with ease. It creaks gently")
 					moveSender("system", "pub")
 				end)

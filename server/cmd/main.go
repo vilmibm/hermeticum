@@ -73,7 +73,6 @@ func newServer() (*gameWorldServer, error) {
 		return nil, err
 	}
 
-	// TODO --reset flag
 	reset := flag.Bool("reset", false, "fully reset the database to its initial state")
 	flag.Parse()
 
@@ -111,6 +110,9 @@ func (s *gameWorldServer) verbHandler(verb, rest string, sender, target db.Objec
 	serverAPI := witch.ServerAPI{
 		Show: func(_ int, _ string) {},
 		Tell: func(_ int, _ string) {},
+		DB: func() db.DB {
+			return s.db
+		},
 	}
 	if sid != "" {
 		send := s.msgRouter[sid]

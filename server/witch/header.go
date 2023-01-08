@@ -5,11 +5,7 @@ import (
 )
 
 func witchHas(l *lua.LState) int {
-	// TODO
-	/*
-		lv := l.ToTable(1)
-		log.Println(lv)
-	*/
+	l.SetGlobal("_has", l.ToTable(1))
 	return 0
 }
 
@@ -28,6 +24,17 @@ func witchGo(l *lua.LState) int {
 	// - check if handler map has a Go handler already, exit early if so
 	// TODO register this object as an exit in DB
 	return addHandler(l, "go")
+}
+
+func witchSeen(l *lua.LState) int {
+	return addHandler(l, "look")
+}
+
+func witchMy(l *lua.LState) int {
+	hasT := l.GetGlobal("_has").(*lua.LTable)
+	val := hasT.RawGetString(l.ToString(1))
+	l.Push(val)
+	return 1
 }
 
 func witchDoes(ls *lua.LState) int {
