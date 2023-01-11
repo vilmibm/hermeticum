@@ -109,7 +109,7 @@ func (s *gameWorldServer) verbHandler(verb, rest string, sender, target db.Objec
 	sid, _ := s.db.SessionIDForAvatar(target)
 	serverAPI := witch.ServerAPI{
 		Show: func(_ int, _ string) {},
-		Tell: func(_ int, _ string) {},
+		Tell: func(_ int, _ string) { log.Println("stub tell called") },
 		DB: func() db.DB {
 			return s.db
 		},
@@ -137,6 +137,7 @@ func (s *gameWorldServer) verbHandler(verb, rest string, sender, target db.Objec
 			send(&cm)
 		}
 		serverAPI.Tell = func(senderID int, msg string) {
+			log.Printf("Tell %s %d %s", sid, senderID, msg)
 			cm := proto.ClientMessage{
 				Type:    proto.ClientMessage_OVERHEARD,
 				Text:    msg,
@@ -237,6 +238,10 @@ func (s *gameWorldServer) Commands(stream proto.GameWorld_CommandsServer) error 
 
 		if affected, err = s.db.Earshot(*avatar); err != nil {
 			return s.HandleError(send, err)
+		}
+
+		for _, obj := range affected {
+			log.Printf("%s heard %s from %d", obj.Data["name"], cmd.Verb, avatar.ID)
 		}
 
 		for _, o = range affected {

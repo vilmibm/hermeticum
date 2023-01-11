@@ -113,9 +113,11 @@ func (db *pgDB) Ensure() error {
 		}
 	}
 
+	// TODO for some reason, when the seen() callback runs for foyer we're calling the stub Tell instead of the sid-closured Tell. figure out why.
+
 	roomScript := `
 		seen(function()
-			tellSender(my("description"))
+			tellMe(my("description"))
 		end)
 	`
 
@@ -426,7 +428,8 @@ func (db *pgDB) Earshot(obj Object) ([]Object, error) {
 	WHERE id IN (
 		SELECT contained FROM contains
 		WHERE container = (
-			SELECT container FROM contains WHERE contained = $1 LIMIT 1))`
+				SELECT container FROM contains WHERE contained = $1 LIMIT 1))
+		OR id = (SELECT container FROM contains WHERE contained = $1 LIMIT 1)`
 	rows, err := db.pool.Query(context.Background(), stmt, obj.ID)
 	if err != nil {
 		return nil, err

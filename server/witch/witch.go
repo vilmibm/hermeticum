@@ -73,6 +73,7 @@ func NewScriptContext(sAPI ServerAPI) (*ScriptContext, error) {
 			l.SetGlobal("tellMe", l.NewFunction(func(l *lua.LState) int {
 				sender := l.GetGlobal("sender").(*lua.LTable)
 				senderID := int(lua.LVAsNumber(sender.RawGetString("ID")))
+				log.Printf("tellMe: %d %s", senderID, l.ToString(1))
 				sc.serverAPI.Tell(senderID, l.ToString(1))
 				return 0
 			}))
@@ -109,7 +110,7 @@ func NewScriptContext(sAPI ServerAPI) (*ScriptContext, error) {
 			}))
 
 			// TODO check execute permission and bail out potentially
-			log.Printf("%#v", vc)
+			//log.Printf("%#v", vc)
 
 			senderT := l.NewTable()
 			senderT.RawSetString("name", lua.LString(vc.Sender.Data["name"]))
