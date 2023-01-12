@@ -37,6 +37,7 @@ type DB interface {
 
 	// Presence
 	SessionIDForAvatar(Object) (string, error)
+	SessionIDForObjID(int) (string, error)
 	AvatarBySessionID(string) (*Object, error)
 	BedroomBySessionID(string) (*Object, error)
 	MoveInto(toMove Object, container Object) error
@@ -117,7 +118,7 @@ func (db *pgDB) Ensure() error {
 
 	roomScript := `
 		seen(function()
-			tellMe(my("description"))
+			tellSender(my("description"))
 		end)
 	`
 
@@ -176,7 +177,7 @@ func (db *pgDB) Ensure() error {
 			Data: data,
 			Script: `
 				go("north", function()
-					tellMe("the heavy door swings forward with ease. It creaks gently")
+					tellSender("the heavy door swings forward with ease. It creaks gently")
 					moveSender("system", "pub")
 				end)
 			`,
@@ -372,6 +373,16 @@ func (db *pgDB) SessionIDForAvatar(obj Object) (string, error) {
 	}
 
 	return *sid, nil
+}
+
+func (db *pgDB) SessionIDForObjID(id int) (string, error) {
+	obj, err := db.GetObjectByID(id)
+	if err != nil {
+		return "", err
+	}
+
+	return db.SessionIDForAvatar(*obj)
+
 }
 
 func (db *pgDB) AvatarBySessionID(sid string) (avatar *Object, err error) {

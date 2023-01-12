@@ -24,8 +24,8 @@ end)
 */
 
 type ServerAPI struct {
-	Tell func(int, string)
-	Show func(int, string)
+	Tell func(int, int, string)
+	Show func(int, int, string)
 	DB   func() db.DB
 }
 
@@ -73,8 +73,18 @@ func NewScriptContext(sAPI ServerAPI) (*ScriptContext, error) {
 			l.SetGlobal("tellMe", l.NewFunction(func(l *lua.LState) int {
 				sender := l.GetGlobal("sender").(*lua.LTable)
 				senderID := int(lua.LVAsNumber(sender.RawGetString("ID")))
+
 				log.Printf("tellMe: %d %s", senderID, l.ToString(1))
-				sc.serverAPI.Tell(senderID, l.ToString(1))
+				sc.serverAPI.Tell(senderID, vc.Target.ID, l.ToString(1))
+				return 0
+			}))
+
+			l.SetGlobal("tellSender", l.NewFunction(func(l *lua.LState) int {
+				sender := l.GetGlobal("sender").(*lua.LTable)
+				senderID := int(lua.LVAsNumber(sender.RawGetString("ID")))
+
+				log.Printf("tellMe: %d %s", senderID, l.ToString(1))
+				sc.serverAPI.Tell(vc.Target.ID, senderID, l.ToString(1))
 				return 0
 			}))
 
@@ -105,9 +115,13 @@ func NewScriptContext(sAPI ServerAPI) (*ScriptContext, error) {
 			l.SetGlobal("showMe", l.NewFunction(func(l *lua.LState) int {
 				sender := l.GetGlobal("sender").(*lua.LTable)
 				senderID := int(lua.LVAsNumber(sender.RawGetString("ID")))
-				sc.serverAPI.Show(senderID, l.ToString(1))
+
+				log.Printf("showMe: %d %s", senderID, l.ToString(1))
+				sc.serverAPI.Show(senderID, vc.Target.ID, l.ToString(1))
 				return 0
 			}))
+
+			// TODO showSender?
 
 			// TODO check execute permission and bail out potentially
 			//log.Printf("%#v", vc)

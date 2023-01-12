@@ -101,50 +101,80 @@ func newServer() (*gameWorldServer, error) {
 }
 
 func (s *gameWorldServer) verbHandler(verb, rest string, sender, target db.Object) error {
+	log.Printf("VH %s %s %d %d", verb, rest, sender.ID, target.ID)
+
 	s.scriptsMutex.RLock()
 	sc, ok := s.scripts[target.ID]
 	s.scriptsMutex.RUnlock()
 	var err error
 
-	sid, _ := s.db.SessionIDForAvatar(target)
+	// TODO this is no longer closing over anything truly interesting and can
+	// likely be simplified
 	serverAPI := witch.ServerAPI{
-		Show: func(_ int, _ string) {},
-		Tell: func(_ int, _ string) { log.Println("stub tell called") },
-		DB: func() db.DB {
-			return s.db
-		},
-	}
-	if sid != "" {
-		send := s.msgRouter[sid]
-		getSenderName := func(senderID int) *string {
-			senderName := "a mysterious stranger"
-
-			sender, err := s.db.GetObjectByID(senderID)
-			if err == nil {
-				senderName = sender.Data["name"]
-			} else {
+		Show: func(fromObjID, toObjID int, action string) {
+			sid, err := s.db.SessionIDForObjID(toObjID)
+			if err != nil {
 				log.Println(err.Error())
+				return
 			}
 
-			return &senderName
-		}
-		serverAPI.Show = func(senderID int, msg string) {
+			from, err := s.db.GetObjectByID(fromObjID)
+			if err != nil {
+				log.Println(err)
+				return
+			}
+
+			speakerName := "an ethereal presence"
+			if from.Data["name"] != "" {
+				speakerName = from.Data["name"]
+			}
+
+			log.Println(sid)
+
+			send := s.msgRouter[sid]
 			cm := proto.ClientMessage{
 				Type:    proto.ClientMessage_EMOTE,
-				Text:    msg,
-				Speaker: getSenderName(senderID),
+				Text:    action,
+				Speaker: &speakerName,
 			}
 			send(&cm)
-		}
-		serverAPI.Tell = func(senderID int, msg string) {
-			log.Printf("Tell %s %d %s", sid, senderID, msg)
+		},
+		Tell: func(fromObjID, toObjID int, msg string) {
+			log.Printf("Tell: %d %d %s", fromObjID, toObjID, msg)
+			sid, err := s.db.SessionIDForObjID(toObjID)
+			if err != nil {
+				log.Println(err)
+				return
+			}
+
+			if sid == "" {
+				return
+			}
+
+			from, err := s.db.GetObjectByID(fromObjID)
+			if err != nil {
+				log.Println(err)
+				return
+			}
+
+			speakerName := "an ethereal presence"
+			if from.Data["name"] != "" {
+				speakerName = from.Data["name"]
+			}
+
+			log.Println(sid)
+
+			send := s.msgRouter[sid]
 			cm := proto.ClientMessage{
 				Type:    proto.ClientMessage_OVERHEARD,
 				Text:    msg,
-				Speaker: getSenderName(senderID),
+				Speaker: &speakerName,
 			}
 			send(&cm)
-		}
+		},
+		DB: func() db.DB {
+			return s.db
+		},
 	}
 
 	if !ok || sc == nil {
