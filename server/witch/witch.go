@@ -23,10 +23,10 @@ end)
 `
 */
 
-type ServerAPI struct {
-	Tell func(int, int, string)
-	Show func(int, int, string)
-	DB   func() db.DB
+type ScriptAPI interface {
+	Tell(int, int, string)
+	Show(int, int, string)
+	DB() db.DB
 }
 
 type VerbContext struct {
@@ -39,12 +39,12 @@ type VerbContext struct {
 type ScriptContext struct {
 	script    string
 	incoming  chan VerbContext
-	serverAPI ServerAPI
+	scriptAPI ScriptAPI
 }
 
-func NewScriptContext(sAPI ServerAPI) (*ScriptContext, error) {
+func NewScriptContext(sAPI ScriptAPI) (*ScriptContext, error) {
 	sc := &ScriptContext{
-		serverAPI: sAPI,
+		scriptAPI: sAPI,
 	}
 	sc.incoming = make(chan VerbContext)
 
@@ -75,7 +75,7 @@ func NewScriptContext(sAPI ServerAPI) (*ScriptContext, error) {
 				senderID := int(lua.LVAsNumber(sender.RawGetString("ID")))
 
 				log.Printf("tellMe: %d %s", senderID, l.ToString(1))
-				sc.serverAPI.Tell(senderID, vc.Target.ID, l.ToString(1))
+				sc.scriptAPI.Tell(senderID, vc.Target.ID, l.ToString(1))
 				return 0
 			}))
 
@@ -84,7 +84,7 @@ func NewScriptContext(sAPI ServerAPI) (*ScriptContext, error) {
 				senderID := int(lua.LVAsNumber(sender.RawGetString("ID")))
 
 				log.Printf("tellMe: %d %s", senderID, l.ToString(1))
-				sc.serverAPI.Tell(vc.Target.ID, senderID, l.ToString(1))
+				sc.scriptAPI.Tell(vc.Target.ID, senderID, l.ToString(1))
 				return 0
 			}))
 
@@ -94,7 +94,7 @@ func NewScriptContext(sAPI ServerAPI) (*ScriptContext, error) {
 				senderID := int(lua.LVAsNumber(sender.RawGetString("ID")))
 				owner := l.ToString(1)
 				name := l.ToString(2)
-				db := sc.serverAPI.DB()
+				db := sc.scriptAPI.DB()
 				senderObj, err := db.GetObjectByID(senderID)
 				if err != nil {
 					log.Println(err.Error())
@@ -117,7 +117,7 @@ func NewScriptContext(sAPI ServerAPI) (*ScriptContext, error) {
 				senderID := int(lua.LVAsNumber(sender.RawGetString("ID")))
 
 				log.Printf("showMe: %d %s", senderID, l.ToString(1))
-				sc.serverAPI.Show(senderID, vc.Target.ID, l.ToString(1))
+				sc.scriptAPI.Show(senderID, vc.Target.ID, l.ToString(1))
 				return 0
 			}))
 
