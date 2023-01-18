@@ -36,8 +36,6 @@ func addPatternHandler(l *lua.LState, verb string) int {
 }
 
 func newWitchEngine(sapi ScriptAPI, obj db.Object) (*lua.LState, error) {
-	var err error
-
 	l := lua.NewState()
 
 	l.SetGlobal("_handlers", l.NewTable())
