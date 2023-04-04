@@ -5,6 +5,7 @@ import (
 	"log"
 	"regexp"
 
+	"github.com/vilmibm/hermeticum/proto"
 	"github.com/vilmibm/hermeticum/server/db"
 	lua "github.com/yuin/gopher-lua"
 )
@@ -23,10 +24,76 @@ end)
 `
 */
 
-type ServerAPI struct {
-	Tell func(int, int, string)
-	Show func(int, int, string)
-	DB   func() db.DB
+type serverAPI struct {
+	db      db.DB
+	getSend func(string) func(*proto.ClientMessage) error
+}
+
+func (s *serverAPI) Tell(fromObjID, toObjID int, msg string) {
+	log.Printf("Tell: %d %d %s", fromObjID, toObjID, msg)
+	sid, err := s.db.SessionIDForObjID(toObjID)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	if sid == "" {
+		return
+	}
+
+	from, err := s.db.GetObjectByID(fromObjID)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	speakerName := "an ethereal presence"
+	if from.Data["name"] != "" {
+		speakerName = from.Data["name"]
+	}
+
+	log.Println(sid)
+
+	send := s.getSend(sid)
+	cm := proto.ClientMessage{
+		Type:    proto.ClientMessage_OVERHEARD,
+		Text:    msg,
+		Speaker: &speakerName,
+	}
+	send(&cm)
+}
+
+func (s *serverAPI) Show(fromObjID, toObjID int, action string) {
+	sid, err := s.db.SessionIDForObjID(toObjID)
+	if err != nil {
+		log.Println(err.Error())
+		return
+	}
+
+	from, err := s.db.GetObjectByID(fromObjID)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	speakerName := "an ethereal presence"
+	if from.Data["name"] != "" {
+		speakerName = from.Data["name"]
+	}
+
+	log.Println(sid)
+
+	send := s.getSend(sid)
+	cm := proto.ClientMessage{
+		Type:    proto.ClientMessage_EMOTE,
+		Text:    action,
+		Speaker: &speakerName,
+	}
+	send(&cm)
+}
+
+func (s *serverAPI) DB() db.DB {
+	return s.db
 }
 
 type VerbContext struct {
@@ -37,14 +104,16 @@ type VerbContext struct {
 }
 
 type ScriptContext struct {
+	db        db.DB
+	getSend   func(*proto.ClientMessage) error
 	script    string
 	incoming  chan VerbContext
-	serverAPI ServerAPI
+	serverAPI serverAPI
 }
 
-func NewScriptContext(sAPI ServerAPI) (*ScriptContext, error) {
+func NewScriptContext(db db.DB, getSend func(string) func(*proto.ClientMessage) error) (*ScriptContext, error) {
 	sc := &ScriptContext{
-		serverAPI: sAPI,
+		serverAPI: serverAPI{db: db, getSend: getSend},
 	}
 	sc.incoming = make(chan VerbContext)
 

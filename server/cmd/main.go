@@ -108,77 +108,12 @@ func (s *gameWorldServer) verbHandler(verb, rest string, sender, target db.Objec
 	s.scriptsMutex.RUnlock()
 	var err error
 
-	// TODO this is no longer closing over anything truly interesting and can
-	// likely be simplified
-	serverAPI := witch.ServerAPI{
-		Show: func(fromObjID, toObjID int, action string) {
-			sid, err := s.db.SessionIDForObjID(toObjID)
-			if err != nil {
-				log.Println(err.Error())
-				return
-			}
-
-			from, err := s.db.GetObjectByID(fromObjID)
-			if err != nil {
-				log.Println(err)
-				return
-			}
-
-			speakerName := "an ethereal presence"
-			if from.Data["name"] != "" {
-				speakerName = from.Data["name"]
-			}
-
-			log.Println(sid)
-
-			send := s.msgRouter[sid]
-			cm := proto.ClientMessage{
-				Type:    proto.ClientMessage_EMOTE,
-				Text:    action,
-				Speaker: &speakerName,
-			}
-			send(&cm)
-		},
-		Tell: func(fromObjID, toObjID int, msg string) {
-			log.Printf("Tell: %d %d %s", fromObjID, toObjID, msg)
-			sid, err := s.db.SessionIDForObjID(toObjID)
-			if err != nil {
-				log.Println(err)
-				return
-			}
-
-			if sid == "" {
-				return
-			}
-
-			from, err := s.db.GetObjectByID(fromObjID)
-			if err != nil {
-				log.Println(err)
-				return
-			}
-
-			speakerName := "an ethereal presence"
-			if from.Data["name"] != "" {
-				speakerName = from.Data["name"]
-			}
-
-			log.Println(sid)
-
-			send := s.msgRouter[sid]
-			cm := proto.ClientMessage{
-				Type:    proto.ClientMessage_OVERHEARD,
-				Text:    msg,
-				Speaker: &speakerName,
-			}
-			send(&cm)
-		},
-		DB: func() db.DB {
-			return s.db
-		},
+	getSend := func(sid string) func(*proto.ClientMessage) error {
+		return s.msgRouter[sid]
 	}
 
 	if !ok || sc == nil {
-		if sc, err = witch.NewScriptContext(serverAPI); err != nil {
+		if sc, err = witch.NewScriptContext(s.db, getSend); err != nil {
 			return err
 		}
 
