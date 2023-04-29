@@ -41,6 +41,12 @@ It's tempting to have the `exits` map because of its simplicity, but it actually
 
 TODO draft something new
 
+Coming back to this after a long break, this new scheme with the exits table seems strictly worse than the tildemush approach. i don't like the amount of book keeping in the new approach--that's complexity that can lead to bugs. i think it's ultimately most elegant to just...let the exit exist in two rooms.
+
+aside: i want to think through why exits shouldn't be on a room but it's a pretty quick answer. i don't want rooms that aren't world editable to be un-connectable to other things. if someone comes along and makes room A and then never comes back, it should be tunnel-able to from other rooms. i like the idea of people finding some cobwebbed room and then building a ladder up to it from somewhere.
+
+so i'm going back to the tildemush approach. the next question is; is the exit maps a useful thing? couldn't the go handler just add a second, mirrored go handler? a handler that checks room directionality?
+
 ## server beta
 
 - [x] grpc server

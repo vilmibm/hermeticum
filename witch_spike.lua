@@ -159,3 +159,35 @@ provides("give $this $money $unit", function(args)
     say("i need more money")
   end
 end)
+
+-- Example 3: a rusty door
+has({
+  name = "rusty metal door"
+  description = "it's almost fully consumed by rust but still heavy and solid feeling"
+})
+
+allows({
+  read = "world",
+  write = "owner"
+  carry = "owner",
+  execute = "world",
+})
+
+-- option 1: fully manual
+
+provides("go east", function(args)
+  if sender.where = "gallery" then
+    move_sender("ossuary")
+  end
+end)
+
+provides("go west", function(args)
+  if sender.where = "ossuary" then
+    move_sender("gallery")
+  end
+end)
+
+-- option 2: magical helper
+
+-- automatically creates the two `go` handlers above
+goes("east", "gallery", "ossuary")

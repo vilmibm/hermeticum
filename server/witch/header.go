@@ -19,11 +19,13 @@ func witchSees(l *lua.LState) int {
 	return addPatternHandler(l, "emote")
 }
 
-func witchGo(l *lua.LState) int {
-	// TODO get the handler map
-	// - check if handler map has a Go handler already, exit early if so
-	// TODO register this object as an exit in DB
-	return addPatternHandler(l, "go")
+func witchGoes(l *lua.LState) int {
+	// arg 0: direction
+	// arg 1: from room
+	// arg 2: to room
+	// TODO call addPatternHandler with "go" verb and direction pattern; figure out how to call moveSender etc
+	// TODO call addPatternHandler again for the reverse direction
+	return -1
 }
 
 func witchSeen(l *lua.LState) int {
