@@ -176,10 +176,7 @@ func (db *pgDB) Ensure() error {
 		oakDoor = &Object{
 			Data: data,
 			Script: `
-				go("north", function()
-					tellSender("the heavy door swings forward with ease. It creaks gently")
-					moveSender("system", "pub")
-				end)
+				goes(north, "pub")
 			`,
 		}
 		if err = db.CreateObject(sysAcc, oakDoor); err != nil {

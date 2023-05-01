@@ -1,5 +1,11 @@
 package witch
 
+/*
+
+This file is the interface between the game server and WITCH execution
+
+*/
+
 import (
 	"fmt"
 	"log"
@@ -127,17 +133,35 @@ func NewScriptContext(db db.DB, getSend func(string) func(*proto.ClientMessage) 
 				// TODO clear this object out of the exits table
 				sc.script = vc.Target.Script
 				l = lua.NewState()
+
+				// direction constants
+				l.SetGlobal("east", lua.LString("_DIR_EAST"))
+				l.SetGlobal("west", lua.LString("_DIR_WEST"))
+				l.SetGlobal("north", lua.LString("_DIR_NORTH"))
+				l.SetGlobal("south", lua.LString("_DIR_SOUTH"))
+				l.SetGlobal("above", lua.LString("_DIR_ABOVE"))
+				l.SetGlobal("below", lua.LString("_DIR_BELOW"))
+				l.SetGlobal("up", lua.LString("_DIR_ABOVE"))
+				l.SetGlobal("down", lua.LString("_DIR_BELOW"))
+
+				// witch object behavior functions
 				l.SetGlobal("has", l.NewFunction(witchHas))
 				l.SetGlobal("hears", l.NewFunction(witchHears))
 				l.SetGlobal("sees", l.NewFunction(witchSees))
 				l.SetGlobal("goes", l.NewFunction(witchGoes))
 				l.SetGlobal("seen", l.NewFunction(witchSeen))
 				l.SetGlobal("my", l.NewFunction(witchMy))
+				l.SetGlobal("provides", l.NewFunction(witchProvides))
+
+				// witch helpers
 				l.SetGlobal("_handlers", l.NewTable())
+
 				if err := l.DoString(vc.Target.Script); err != nil {
 					log.Printf("error parsing script %s: %s", vc.Target.Script, err.Error())
 				}
 			}
+
+			// witch action functions relative to calling context
 
 			l.SetGlobal("tellMe", l.NewFunction(func(l *lua.LState) int {
 				sender := l.GetGlobal("sender").(*lua.LTable)

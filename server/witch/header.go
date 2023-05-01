@@ -1,6 +1,16 @@
 package witch
 
+/*
+
+This file contains the definitions of functions that are injected into scope for WITCH scripts. See witch.go's ScriptContext to see how they are actually added to a LuaState.
+
+TODO: consider making this (or witch.go) a different package entirely. the `witch` prefix for the function names in this file is a little annoying.
+
+*/
+
 import (
+	"strings"
+
 	lua "github.com/yuin/gopher-lua"
 )
 
@@ -9,7 +19,20 @@ func witchHas(l *lua.LState) int {
 	return 0
 }
 
-// TODO provides
+func witchProvides(l *lua.LState) int {
+	// TODO test this manually
+
+	verbAndPattern := l.ToString(1)
+	l.Pop(1)
+
+	split := strings.SplitN(verbAndPattern, " ", 2)
+	verb := split[0]
+	pattern := split[1]
+
+	l.Push(lua.LString(pattern))
+
+	return addPatternHandler(l, verb)
+}
 
 func witchHears(l *lua.LState) int {
 	return addPatternHandler(l, "say")

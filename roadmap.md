@@ -47,6 +47,26 @@ aside: i want to think through why exits shouldn't be on a room but it's a prett
 
 so i'm going back to the tildemush approach. the next question is; is the exit maps a useful thing? couldn't the go handler just add a second, mirrored go handler? a handler that checks room directionality?
 
+i've added a WITCH function, goes, which takes a direction and two rooms. this WITCH function adds two `go` verb handlers--one for the direction in the `goes` invocation and then one for the reverse. i like this more than the exit map, but it does mean that exits could compete each other. can't remember if that could happen in tildemush (was the exits map stored per exit? was that guarded?).
+
+i think the competing is fine. i'm actually fine with it. i think that goes() could also add an invocation of `provides()` like this:
+
+```lua
+provides("use $this", function(args)
+  move_sender("target_room")
+end)
+```
+
+A nice idea is the ability for an exit to add flavor to an entity transitioning through it; for this I can maybe add:
+
+```lua
+goesAnd(east, "ossuary", "gallery", function(args)
+  tellSender("the door squeals harshly as you move it but allows you passage")
+end)
+```
+
+The movement is still generated.
+
 ## server beta
 
 - [x] grpc server
