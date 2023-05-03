@@ -176,6 +176,9 @@ func (db *pgDB) Ensure() error {
 		oakDoor = &Object{
 			Data: data,
 			Script: `
+				provides("get tetanus", function(args)
+					tellSender("you now have tetanus")
+				end)
 				goes(north, "pub")
 			`,
 		}

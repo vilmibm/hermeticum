@@ -16,6 +16,15 @@ import (
 	lua "github.com/yuin/gopher-lua"
 )
 
+const (
+	dirEast  = "_DIR_EAST"
+	dirWest  = "_DIR_WEST"
+	dirNorth = "_DIR_NORTH"
+	dirSouth = "_DIR_SOUTH"
+	dirAbove = "_DIR_ABOVE"
+	dirBelow = "_DIR_BELOW"
+)
+
 /*
 allows({
   read = "world",
@@ -135,14 +144,14 @@ func NewScriptContext(db db.DB, getSend func(string) func(*proto.ClientMessage) 
 				l = lua.NewState()
 
 				// direction constants
-				l.SetGlobal("east", lua.LString("_DIR_EAST"))
-				l.SetGlobal("west", lua.LString("_DIR_WEST"))
-				l.SetGlobal("north", lua.LString("_DIR_NORTH"))
-				l.SetGlobal("south", lua.LString("_DIR_SOUTH"))
-				l.SetGlobal("above", lua.LString("_DIR_ABOVE"))
-				l.SetGlobal("below", lua.LString("_DIR_BELOW"))
-				l.SetGlobal("up", lua.LString("_DIR_ABOVE"))
-				l.SetGlobal("down", lua.LString("_DIR_BELOW"))
+				l.SetGlobal("east", lua.LString(dirEast))
+				l.SetGlobal("west", lua.LString(dirWest))
+				l.SetGlobal("north", lua.LString(dirNorth))
+				l.SetGlobal("south", lua.LString(dirSouth))
+				l.SetGlobal("above", lua.LString(dirAbove))
+				l.SetGlobal("below", lua.LString(dirBelow))
+				l.SetGlobal("up", lua.LString(dirAbove))
+				l.SetGlobal("down", lua.LString(dirBelow))
 
 				// witch object behavior functions
 				l.SetGlobal("has", l.NewFunction(witchHas))
@@ -227,11 +236,13 @@ func NewScriptContext(db db.DB, getSend func(string) func(*proto.ClientMessage) 
 
 			handlers := l.GetGlobal("_handlers").(*lua.LTable)
 			handlers.ForEach(func(k, v lua.LValue) {
+				log.Println("checking handler verbs", k)
 				if k.String() != vc.Verb {
 					return
 				}
 				v.(*lua.LTable).ForEach(func(kk, vv lua.LValue) {
 					pattern := regexp.MustCompile(kk.String())
+					log.Println("checking handler", kk.String(), vv, pattern)
 					if pattern.MatchString(vc.Rest) {
 						// TODO TODO TODO TODO TODO
 						// this could be a remote code execution vuln; but by being here, I

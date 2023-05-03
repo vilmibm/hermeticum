@@ -9,6 +9,7 @@ TODO: consider making this (or witch.go) a different package entirely. the `witc
 */
 
 import (
+	"log"
 	"strings"
 
 	lua "github.com/yuin/gopher-lua"
@@ -23,36 +24,47 @@ func witchProvides(l *lua.LState) int {
 	// TODO test this manually
 
 	verbAndPattern := l.ToString(1)
-	l.Pop(1)
+	cb := l.ToFunction(2)
 
 	split := strings.SplitN(verbAndPattern, " ", 2)
 	verb := split[0]
 	pattern := split[1]
 
-	l.Push(lua.LString(pattern))
-
-	return addPatternHandler(l, verb)
+	return addPatternHandler(l, verb, pattern, cb)
 }
 
 func witchHears(l *lua.LState) int {
-	return addPatternHandler(l, "say")
+	pattern := l.ToString(1)
+	cb := l.ToFunction(2)
+	return addPatternHandler(l, "say", pattern, cb)
 }
 
 func witchSees(l *lua.LState) int {
-	return addPatternHandler(l, "emote")
+	pattern := l.ToString(1)
+	cb := l.ToFunction(2)
+
+	return addPatternHandler(l, "emote", pattern, cb)
 }
 
 func witchGoes(l *lua.LState) int {
-	// arg 0: direction
-	// arg 1: from room
-	// arg 2: to room
-	// TODO call addPatternHandler with "go" verb and direction pattern; figure out how to call moveSender etc
-	// TODO call addPatternHandler again for the reverse direction
-	return -1
+	// TODO validate direction
+	// TODO convert direction constant to english
+
+	direction := l.ToString(1)
+	targetRoom := l.ToString(2)
+
+	cb := func(l *lua.LState) int {
+		log.Printf("please move sender to target room '%s'", targetRoom)
+		return 0
+	}
+
+	// TODO call addPatternHandler again for the reverse direction (make a reverse helper)
+	return addPatternHandler(l, "go", direction, l.NewFunction(cb))
 }
 
 func witchSeen(l *lua.LState) int {
-	return addHandler(l, "look")
+	cb := l.ToFunction(1)
+	return addHandler(l, "look", cb)
 }
 
 func witchMy(l *lua.LState) int {
@@ -69,11 +81,10 @@ func witchDoes(ls *lua.LState) int {
 	return 0
 }
 
-func addHandler(l *lua.LState, verb string) int {
+func addHandler(l *lua.LState, verb string, cb *lua.LFunction) int {
 	pattern := ".*"
-	cb := l.ToFunction(1)
 
-	//log.Printf("adding handler: %s %s %#v", verb, pattern, cb)
+	log.Printf("adding handler: %s %s %#v", verb, pattern, cb)
 
 	handlers := l.GetGlobal("_handlers").(*lua.LTable)
 
@@ -88,11 +99,8 @@ func addHandler(l *lua.LState, verb string) int {
 	return 0
 }
 
-func addPatternHandler(l *lua.LState, verb string) int {
-	pattern := l.ToString(1)
-	cb := l.ToFunction(2)
-
-	//log.Printf("adding handler: %s %s %#v", verb, string(pattern), cb)
+func addPatternHandler(l *lua.LState, verb, pattern string, cb *lua.LFunction) int {
+	log.Printf("adding handler: %s %s %#v", verb, string(pattern), cb)
 
 	handlers := l.GetGlobal("_handlers").(*lua.LTable)
 
