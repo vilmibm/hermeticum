@@ -16,15 +16,6 @@ import (
 	lua "github.com/yuin/gopher-lua"
 )
 
-const (
-	dirEast  = "_DIR_EAST"
-	dirWest  = "_DIR_WEST"
-	dirNorth = "_DIR_NORTH"
-	dirSouth = "_DIR_SOUTH"
-	dirAbove = "_DIR_ABOVE"
-	dirBelow = "_DIR_BELOW"
-)
-
 /*
 allows({
   read = "world",
