@@ -98,6 +98,8 @@ containership problem.
 
 give up and do one way exits.
 
+well, now that i've given up and done one way exits the most pressing thing is to have object creation in client. it's just maddening to have to make test objects out-of-client. also revision tracking was one of the clunkiest things in the alpha, so i am eager to think that through anew.
+
 ## server beta
 
 - [x] grpc server
