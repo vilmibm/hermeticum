@@ -39,9 +39,3 @@ CREATE TABLE contains (
 );
 
 CREATE TYPE heading AS ENUM ('north', 'south', 'east', 'west', 'above', 'below');
-
-CREATE TABLE exits (
-  startroom integer REFERENCES objects ON DELETE CASCADE,
-  endroom   integer REFERENCES objects ON DELETE CASCADE,
-  direction heading NOT NULL
-);

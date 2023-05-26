@@ -173,21 +173,4 @@ allows({
   execute = "world",
 })
 
--- option 1: fully manual
-
-provides("go east", function(args)
-  if sender.where = "gallery" then
-    move_sender("ossuary")
-  end
-end)
-
-provides("go west", function(args)
-  if sender.where = "ossuary" then
-    move_sender("gallery")
-  end
-end)
-
--- option 2: magical helper
-
--- automatically creates the two `go` handlers above
-goes("east", "gallery", "ossuary")
+goes("east", "gallery")

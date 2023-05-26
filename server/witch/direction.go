@@ -1,5 +1,7 @@
 package witch
 
+import "fmt"
+
 const (
 	dirEast  = "_DIR_EAST"
 	dirWest  = "_DIR_WEST"
@@ -11,6 +13,10 @@ const (
 
 type Direction struct {
 	raw string
+}
+
+func NewDirection(raw string) Direction {
+	return Direction{raw: raw}
 }
 
 func (d Direction) Reverse() Direction {
@@ -29,11 +35,11 @@ func (d Direction) Reverse() Direction {
 	case dirSouth:
 		raw = dirNorth
 	}
-	return Direction{raw: raw}
+	return NewDirection(raw)
 }
 
-// NormalizeHuman takes a direction someone might type like "up" or "north" and returns the correct Direction struct
-func NormalizeHuman(humanDir string) Direction {
+// NormalizeDirection takes a direction someone might type like "up" or "north" and returns the correct Direction struct
+func NormalizeDirection(humanDir string) (Direction, error) {
 	raw := ""
 	switch humanDir {
 	case "up":
@@ -50,9 +56,11 @@ func NormalizeHuman(humanDir string) Direction {
 		raw = dirNorth
 	case "south":
 		raw = dirSouth
-
+	default:
+		return Direction{}, fmt.Errorf("did not understand direction '%s'", humanDir)
 	}
-	return Direction{raw: raw}
+
+	return NewDirection(raw), nil
 }
 
 // Human returns a string form of this direction like "above" or "north"
@@ -73,4 +81,8 @@ func (d Direction) Human() (humanDir string) {
 	}
 
 	return humanDir
+}
+
+func (d Direction) Equals(o Direction) bool {
+	return d.raw == o.raw
 }

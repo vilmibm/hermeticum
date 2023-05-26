@@ -67,6 +67,37 @@ end)
 
 The movement is still generated.
 
+
+so the problem with all of this is that the beahvior of the exit is
+supposedly going to change based on how it is contained. however, we only
+re-read the code when the code changes. we're trying to affect game state
+as part of code compilation and that's uncool.
+
+a user would create a new exit, put all the finishing touches on it, then move
+it from their person to the room the exit originates from. WITCH would not
+recompile and no containership would update.
+
+i think the dream of goes(north, "pub") is donezo. i think the next best
+thing is goes(north, "foyer", "pub"). on execution, the sender is checked;
+if their container is the first room then they are moved to the second
+room. both cases suffer from the double containment problem. that second
+containment *cannot* be updated as part of WITCH compilation.
+
+so we're back to two options:
+- one way exits
+- special creation semantics that handle something like double containership
+
+in the interest of moving on--and of putting off special top level commands
+that exist outside of WITCH--i want to do one way exits for now. this sucks
+because all the flavor written for an exit has to be duplicated for its pair.
+
+some other ideas because i can't let go. what of a variation on the exits map
+where each exit stores a key in its has data about where it goes. this is no
+better than a dynamic handler (it's worse) and does not help the double
+containership problem.
+
+give up and do one way exits.
+
 ## server beta
 
 - [x] grpc server

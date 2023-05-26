@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v4/pgxpool"
@@ -30,6 +31,7 @@ type DB interface {
 	// General
 	GetObject(owner, name string) (*Object, error)
 	GetObjectByID(ID int) (*Object, error)
+	SearchObjectsByName(term string) ([]Object, error)
 
 	// Defaults
 	Ensure() error
@@ -41,7 +43,8 @@ type DB interface {
 	AvatarBySessionID(string) (*Object, error)
 	BedroomBySessionID(string) (*Object, error)
 	MoveInto(toMove Object, container Object) error
-	Earshot(Object) ([]Object, error)
+	Earshot(vantage Object) ([]Object, error)
+	Resolve(vantage Object, term string) ([]Object, error)
 }
 
 type Account struct {
@@ -486,6 +489,54 @@ func (db *pgDB) GetObject(owner, name string) (obj *Object, err error) {
 		&obj.ID, &obj.Avatar, &obj.Data, &obj.OwnerID, &obj.Script)
 
 	return
+}
+
+func (db *pgDB) SearchObjectsByName(term string) ([]Object, error) {
+	ctx := context.Background()
+
+	stmt := `
+		SELECT id, avatar, data, owner, script
+		FROM objects
+		WHERE data['name']::varchar LIKE $1 
+	`
+
+	rows, err := db.pool.Query(ctx, stmt, "%"+term+"%")
+	if err != nil {
+		return nil, err
+	}
+
+	out := []Object{}
+	for rows.Next() {
+		o := Object{}
+		if err = rows.Scan(
+			&o.ID,
+			&o.Avatar,
+			&o.Data,
+			&o.OwnerID,
+			&o.Script); err != nil {
+			return nil, err
+		}
+		out = append(out, o)
+	}
+
+	return out, nil
+}
+
+func (db *pgDB) Resolve(vantage Object, term string) ([]Object, error) {
+	stuff, err := db.Earshot(vantage)
+	if err != nil {
+		return nil, err
+	}
+
+	out := []Object{}
+
+	for _, o := range stuff {
+		if strings.Contains(o.Data["name"], term) {
+			out = append(out, o)
+		}
+	}
+
+	return out, nil
 }
 
 func (db *pgDB) GetAccountAvatar(account Account) (*Object, error) {
