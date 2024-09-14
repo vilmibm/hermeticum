@@ -91,6 +91,22 @@ func Pool() (*pgxpool.Pool, error) {
 	return pool, nil
 }
 
+type ResetOpts struct {
+	DB *pgDB
+}
+
+func Reset(opts ResetOpts) error {
+	if err := opts.DB.Erase(); err != nil {
+		return fmt.Errorf("failed to reset database: %w", err)
+	}
+
+	if err := opts.DB.Ensure(); err != nil {
+		return fmt.Errorf("failed to ensure default entities: %w", err)
+	}
+
+	return nil
+}
+
 func NewDB() (*pgDB, error) {
 	pool, err := Pool()
 	if err != nil {

@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -18,10 +17,7 @@ import (
 	"google.golang.org/grpc/peer"
 )
 
-// TODO remove port stuff
-
 type ServeOpts struct {
-	Port int
 }
 
 type ServerAuthCredentials struct {
@@ -126,16 +122,6 @@ func newServer() (*gameWorldServer, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	reset := flag.Bool("reset", false, "fully reset the database to its initial state")
-	flag.Parse()
-
-	if *reset {
-		if err = db.Erase(); err != nil {
-			return nil, fmt.Errorf("failed to reset database: %w", err)
-		}
-	}
-
 	if err = db.Ensure(); err != nil {
 		return nil, fmt.Errorf("failed to ensure default entities: %w", err)
 	}
