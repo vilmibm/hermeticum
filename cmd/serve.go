@@ -6,17 +6,13 @@ import (
 )
 
 func init() {
-	serveCmd.Flags().IntP("port", "p", 6666, "host port")
 	rootCmd.AddCommand(serveCmd)
 }
 
 var serveCmd = &cobra.Command{
 	Use: "serve",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		port, _ := cmd.Flags().GetInt("port")
-		opts := server.ServeOpts{
-			Port: port,
-		}
+		opts := server.ServeOpts{}
 		return server.Serve(opts)
 	},
 }

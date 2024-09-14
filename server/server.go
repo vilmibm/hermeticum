@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"sync"
 
 	"github.com/vilmibm/hermeticum/proto"
@@ -16,6 +17,8 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
 )
+
+// TODO remove port stuff
 
 type ServeOpts struct {
 	Port int
@@ -82,19 +85,26 @@ func (*ServerAuthCredentials) ServerHandshake(conn net.Conn) (net.Conn, credenti
 	return conn, pai, nil
 }
 
-func Serve(opts ServeOpts) error {
-	gs := grpc.NewServer(grpc.Creds(&ServerAuthCredentials{}))
+const sockAddr = "/tmp/hermeticum.sock"
 
-	l, err := net.Listen("tcp", fmt.Sprintf(":%d", opts.Port))
+func Serve(opts ServeOpts) error {
+	os.Remove(sockAddr)
+
+	l, err := net.Listen("unix", sockAddr)
 	if err != nil {
 		return err
 	}
+	defer l.Close()
+
+	gs := grpc.NewServer(grpc.Creds(&ServerAuthCredentials{}))
 	s, err := newServer()
 	if err != nil {
 		return err
 	}
 
 	proto.RegisterGameWorldServer(gs, s)
+	log.Println("i'm starting")
+	log.Printf("sock address: %s", sockAddr)
 	gs.Serve(l)
 
 	return nil
