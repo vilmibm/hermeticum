@@ -111,8 +111,6 @@ type gameWorldServer struct {
 }
 
 func newServer() (*gameWorldServer, error) {
-	// TODO read from env or whatever
-	// TODO switch to a little pg
 	// TODO audit and clean up all of this
 	db, err := db.NewDB()
 	if err != nil {
