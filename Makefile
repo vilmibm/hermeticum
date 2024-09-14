@@ -14,13 +14,16 @@ help: ## Print info about all commands
 pgdata:
 	./pginit.sh
 
-.PHONY: serve
-serve: pgdata
+pgdata/postmaster.pid: pgdata
 	./pgstart.sh
-	go run . serve
+
+.PHONY: serve
+serve: pgdata/postmaster.pid
+	source pg.env && go run . serve
 
 .PHONY: clean
 clean:
+	./pgstop.sh
 	rm hermeticum
 
 .PHONY: connect

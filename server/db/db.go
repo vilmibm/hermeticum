@@ -10,7 +10,8 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 //go:embed schema.sql
@@ -72,16 +73,32 @@ type pgDB struct {
 	pool *pgxpool.Pool
 }
 
-func NewDB(connURL string) (DB, error) {
-	pool, err := pgxpool.Connect(context.Background(), connURL)
+func Connect() (*pgx.Conn, error) {
+	conn, err := pgx.Connect(context.Background(), "")
+	if err != nil {
+		return nil, fmt.Errorf("Unable to connect to database: %w", err)
+	}
+
+	return conn, nil
+}
+
+func Pool() (*pgxpool.Pool, error) {
+	pool, err := pgxpool.New(context.Background(), "")
+	if err != nil {
+		return nil, fmt.Errorf("Unable to connect to database: %w", err)
+	}
+
+	return pool, nil
+}
+
+func NewDB() (*pgDB, error) {
+	pool, err := Pool()
 	if err != nil {
 		return nil, err
 	}
-	pgdb := &pgDB{
+	return &pgDB{
 		pool: pool,
-	}
-
-	return pgdb, nil
+	}, nil
 }
 
 // Erase fully destroys the database's contents, dropping all tables.

@@ -114,7 +114,7 @@ func newServer() (*gameWorldServer, error) {
 	// TODO read from env or whatever
 	// TODO switch to a little pg
 	// TODO audit and clean up all of this
-	db, err := db.NewDB("postgres://vilmibm:vilmibm@localhost:5432/hermeticum")
+	db, err := db.NewDB()
 	if err != nil {
 		return nil, err
 	}
