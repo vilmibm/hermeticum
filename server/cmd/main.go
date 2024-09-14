@@ -15,10 +15,7 @@ import (
 )
 
 var (
-	tls      = flag.Bool("tls", false, "Connection uses TLS if true, else plain TCP")
-	certFile = flag.String("cert_file", "", "The TLS cert file")
-	keyFile  = flag.String("key_file", "", "The TLS key file")
-	port     = flag.Int("port", 6666, "The server port")
+	port = flag.Int("port", 6666, "The server port")
 )
 
 func _main() (err error) {
@@ -28,23 +25,6 @@ func _main() (err error) {
 	}
 
 	var opts []grpc.ServerOption
-	if *tls {
-		log.Fatal("tls unsupported")
-		/*
-			// TODO base some stuff on the data package in the examples to get tls working
-			if *certFile == "" {
-				*certFile = data.Path("x509/server_cert.pem")
-			}
-			if *keyFile == "" {
-				*keyFile = data.Path("x509/server_key.pem")
-			}
-			creds, err := credentials.NewServerTLSFromFile(*certFile, *keyFile)
-			if err != nil {
-				log.Fatalf("Failed to generate credentials %v", err)
-			}
-			opts = []grpc.ServerOption{grpc.Creds(creds)}
-		*/
-	}
 	grpcServer := grpc.NewServer(opts...)
 	srv, err := newServer()
 	if err != nil {
@@ -68,6 +48,7 @@ type gameWorldServer struct {
 
 func newServer() (*gameWorldServer, error) {
 	// TODO read from env or whatever
+	// TODO switch to a little pg
 	db, err := db.NewDB("postgres://vilmibm:vilmibm@localhost:5432/hermeticum")
 	if err != nil {
 		return nil, err

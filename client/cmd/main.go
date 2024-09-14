@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -20,8 +19,6 @@ import (
 )
 
 var (
-	tls                = flag.Bool("tls", false, "Connection uses TLS if true, else plain TCP")
-	caFile             = flag.String("ca_file", "", "The file containing the CA root cert file")
 	serverAddr         = flag.String("addr", "localhost:6666", "The server address in the format of host:port")
 	serverHostOverride = flag.String("server_host_override", "x.test.example.com", "The server name used to verify the hostname returned by the TLS handshake")
 )
@@ -139,21 +136,7 @@ func (cs *ClientState) AddMessage(msg *proto.ClientMessage) {
 
 func _main() error {
 	var opts []grpc.DialOption
-	if *tls {
-		return errors.New("TODO tls unsupported")
-		/*
-			if *caFile == "" {
-				*caFile = data.Path("x509/ca_cert.pem")
-			}
-			creds, err := credentials.NewClientTLSFromFile(*caFile, *serverHostOverride)
-			if err != nil {
-				log.Fatalf("Failed to create TLS credentials %v", err)
-			}
-			opts = append(opts, grpc.WithTransportCredentials(creds))
-		*/
-	} else {
-		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	}
+	opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 
 	conn, err := grpc.Dial(*serverAddr, opts...)
 	if err != nil {
@@ -226,76 +209,6 @@ func _main() error {
 
 	sigC := make(chan os.Signal, 1)
 	signal.Notify(sigC, os.Interrupt)
-
-	lunfi := tview.NewInputField().SetLabel("account name")
-	lpwfi := tview.NewInputField().SetLabel("password").SetMaskCharacter('~')
-
-	loginPage := tview.NewForm().AddFormItem(lunfi).AddFormItem(lpwfi).
-		SetCancelFunc(func() {
-			pages.SwitchToPage("main")
-		})
-
-	loginSubmitFn := func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		si, err := cs.Client.Login(ctx, &proto.AuthInfo{
-			Username: lunfi.GetText(),
-			Password: lpwfi.GetText(),
-		})
-		if err != nil {
-			panic(err.Error())
-		}
-
-		cs.SessionInfo = si
-
-		pages.SwitchToPage("game")
-		app.SetFocus(commandInput)
-		go cs.HandleSIGINT(sigC)
-		// TODO error handle
-		go cs.Messages()
-	}
-
-	// TODO login and register pages should refuse blank entries
-	// TODO password should have rules
-	loginPage.AddButton("gimme that shit", loginSubmitFn)
-	loginPage.AddButton("nah get outta here", func() {
-		pages.SwitchToPage("main")
-	})
-	pages.AddPage("login", loginPage, true, false)
-
-	runfi := tview.NewInputField().SetLabel("account name")
-	rpwfi := tview.NewInputField().SetLabel("password").SetMaskCharacter('~')
-
-	registerPage := tview.NewForm().AddFormItem(runfi).AddFormItem(rpwfi).
-		SetCancelFunc(func() {
-			pages.SwitchToPage("main")
-		})
-
-	registerSubmitFn := func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		si, err := cs.Client.Register(ctx, &proto.AuthInfo{
-			Username: runfi.GetText(),
-			Password: rpwfi.GetText(),
-		})
-		if err != nil {
-			panic(err.Error())
-		}
-
-		cs.SessionInfo = si
-
-		pages.SwitchToPage("game")
-		app.SetFocus(commandInput)
-		go cs.HandleSIGINT(sigC)
-		// TODO error handle
-		go cs.Messages()
-	}
-
-	registerPage.AddButton("gimme that shit", registerSubmitFn)
-	registerPage.AddButton("nah get outta here", func() {
-		pages.SwitchToPage("main")
-	})
-	pages.AddPage("register", registerPage, true, false)
 
 	msgView := tview.NewTextView().SetScrollable(true).SetWrap(true).SetWordWrap(true)
 	cs.messagesView = msgView
