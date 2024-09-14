@@ -27,4 +27,5 @@ clean:
 	rm hermeticum
 
 .PHONY: connect
+connect:
 	go run . connect
