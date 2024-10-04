@@ -112,7 +112,7 @@ func Serve(opts ServeOpts) error {
 type gameWorldServer struct {
 	proto.UnimplementedGameWorldServer
 
-	db           db.DB
+	db           *db.DB
 	sessions     map[uint32]*userIO
 	sessionMutex sync.Mutex
 	scripts      map[int]*witch.ScriptContext
@@ -128,8 +128,7 @@ func newServer() (*gameWorldServer, error) {
 		return nil, fmt.Errorf("failed to ensure default entities: %w", err)
 	}
 
-	// TODO what should this do -- probably clear avatars from any rooms
-	if err = db.ClearSessions(); err != nil {
+	if err = db.GhostBust(); err != nil {
 		return nil, fmt.Errorf("could not clear sessions: %w", err)
 	}
 
@@ -218,7 +217,7 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 		return fmt.Errorf("could not find user for uid %d: %w", uid, err)
 	}
 
-	avatar, err := s.db.GreateAvatar(*u)
+	avatar, err := s.db.GreateAvatar(uid, u.Username)
 	if err != nil {
 		return fmt.Errorf("failed to get or create avatar for %d: %w", uid, err)
 	}
@@ -240,7 +239,8 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 		s.sessionMutex.Lock()
 		delete(s.sessions, uid)
 		s.sessionMutex.Unlock()
-		// TODO remove avatar from contains, send message to earshot; see EndSession
+		s.db.Derez(uid)
+		// TODO send message to earshot about departure
 	}()
 
 	go func() {

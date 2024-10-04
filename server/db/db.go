@@ -3,65 +3,19 @@ package db
 import (
 	"context"
 	_ "embed"
-	"errors"
 	"fmt"
 	"log"
 	"math/rand"
 	"os/user"
+	"strconv"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 //go:embed schema.sql
 var schema string
-
-// TODO I have a suspicion that I'm going to want to move to an ORM like model where the object struct has a DB member and various methods on it. For now I'm just going to keep adding shit to the DB interface because if it doesn't get too long in the end then it's fine.
-
-type DB interface {
-	// Accounts
-	CreateAccount(string, string) (*Account, error)
-	ValidateCredentials(string, string) (*Account, error)
-	GetAccount(string) (*Account, error)
-	StartSession(Account) (string, error)
-	EndSession(string) error
-	ActiveSessions() ([]Session, error)
-	ClearSessions() error
-
-	GreateAvatar(user.User) (*Object, error)
-
-	// General
-	GetObject(owner, name string) (*Object, error)
-	GetObjectByID(ID int) (*Object, error)
-	SearchObjectsByName(term string) ([]Object, error)
-
-	// Defaults
-	Ensure() error
-	Erase() error
-
-	// Presence
-	SessionIDForAvatar(Object) (string, error)
-	SessionIDForObjID(int) (string, error)
-	AvatarBySessionID(string) (*Object, error)
-	BedroomBySessionID(string) (*Object, error)
-	MoveInto(toMove Object, container Object) error
-	Earshot(vantage Object) ([]Object, error)
-	Resolve(vantage Object, term string) ([]Object, error)
-}
-
-type Account struct {
-	ID     int
-	Name   string
-	Pwhash string
-	God    bool
-}
-
-type Session struct {
-	ID        string
-	AccountID int
-}
 
 type Object struct {
 	ID      int
@@ -72,7 +26,7 @@ type Object struct {
 	Script  string
 }
 
-type pgDB struct {
+type DB struct {
 	pool *pgxpool.Pool
 }
 
@@ -95,7 +49,7 @@ func Pool() (*pgxpool.Pool, error) {
 }
 
 type ResetOpts struct {
-	DB *pgDB
+	DB *DB
 }
 
 func Reset(opts ResetOpts) error {
@@ -110,18 +64,18 @@ func Reset(opts ResetOpts) error {
 	return nil
 }
 
-func NewDB() (*pgDB, error) {
+func NewDB() (*DB, error) {
 	pool, err := Pool()
 	if err != nil {
 		return nil, err
 	}
-	return &pgDB{
+	return &DB{
 		pool: pool,
 	}, nil
 }
 
 // Erase fully destroys the database's contents, dropping all tables.
-func (db *pgDB) Erase() (err error) {
+func (db *DB) Erase() (err error) {
 	stmts := []string{
 		"DROP SCHEMA public CASCADE",
 		"CREATE SCHEMA public",
@@ -140,18 +94,19 @@ func (db *pgDB) Erase() (err error) {
 }
 
 // Ensure checks for and then creates default resources if they do not exist (like the Foyer)
-func (db *pgDB) Ensure() error {
+func (db *DB) Ensure() error {
 	// TODO this is sloppy but shrug
 	_, err := db.pool.Exec(context.Background(), schema)
-	//log.Println(err)
-	sysAcc, err := db.GetAccount("system")
+	u, err := user.Lookup("root")
 	if err != nil {
-		// TODO actually check error. for now assuming it means does not exist
-		sysAcc, err = db.CreateGod("system", "")
-		if err != nil {
-			return fmt.Errorf("failed to create system account: %w", err)
-		}
+		return err
 	}
+	uid, err := strconv.Atoi(u.Uid)
+	if err != nil {
+		return err
+	}
+
+	rootuid := uint32(uid)
 
 	// TODO for some reason, when the seen() callback runs for foyer we're calling the stub Tell instead of the sid-closured Tell. figure out why.
 
@@ -161,7 +116,7 @@ func (db *pgDB) Ensure() error {
 		end)
 	`
 
-	foyer, err := db.GetObject("system", "foyer")
+	foyer, err := db.GetObject(rootuid, "foyer")
 	if err != nil {
 		// TODO actually check error. for now assuming it means does not exist
 		data := map[string]string{}
@@ -171,12 +126,12 @@ func (db *pgDB) Ensure() error {
 			Data:   data,
 			Script: roomScript,
 		}
-		if err = db.CreateObject(sysAcc, foyer); err != nil {
+		if err = db.CreateObject(rootuid, foyer); err != nil {
 			return err
 		}
 	}
 
-	egg, err := db.GetObject("system", "floor egg")
+	egg, err := db.GetObject(rootuid, "floor egg")
 	if err != nil {
 		// TODO actually check error. for now assuming it means does not exist
 		data := map[string]string{}
@@ -186,12 +141,12 @@ func (db *pgDB) Ensure() error {
 			Data:   data,
 			Script: "",
 		}
-		if err = db.CreateObject(sysAcc, egg); err != nil {
+		if err = db.CreateObject(rootuid, egg); err != nil {
 			return err
 		}
 	}
 
-	pub, err := db.GetObject("system", "pub")
+	pub, err := db.GetObject(rootuid, "pub")
 	if err != nil {
 		// TODO actually check error. for now assuming it means does not exist
 		data := map[string]string{}
@@ -201,12 +156,12 @@ func (db *pgDB) Ensure() error {
 			Data:   data,
 			Script: roomScript,
 		}
-		if err = db.CreateObject(sysAcc, pub); err != nil {
+		if err = db.CreateObject(rootuid, pub); err != nil {
 			return err
 		}
 	}
 
-	oakDoor, err := db.GetObject("system", "oak door")
+	oakDoor, err := db.GetObject(rootuid, "oak door")
 	if err != nil {
 		// TODO actually check error. for now assuming it means does not exist
 		data := map[string]string{}
@@ -221,14 +176,14 @@ func (db *pgDB) Ensure() error {
 				goes(north, "pub")
 			`,
 		}
-		if err = db.CreateObject(sysAcc, oakDoor); err != nil {
+		if err = db.CreateObject(rootuid, oakDoor); err != nil {
 			return err
 		}
 	}
 
-	sysAva, err := db.GetAccountAvatar(*sysAcc)
+	sysAva, err := db.GreateAvatar(rootuid, "root")
 	if err != nil {
-		return fmt.Errorf("could not find avatar for system account: %w", err)
+		return fmt.Errorf("could not find or create avatar for system account: %w", err)
 	}
 
 	db.MoveInto(*sysAva, *foyer)
@@ -238,26 +193,7 @@ func (db *pgDB) Ensure() error {
 	return nil
 }
 
-func (db *pgDB) CreateGod(name, password string) (account *Account, err error) {
-	account = &Account{
-		Name:   name,
-		Pwhash: password,
-		God:    true,
-	}
-
-	return account, db.createAccount(account)
-}
-
-func (db *pgDB) CreateAccount(name, password string) (account *Account, err error) {
-	account = &Account{
-		Name:   name,
-		Pwhash: password,
-	}
-
-	return account, db.createAccount(account)
-}
-
-func (db *pgDB) GreateAvatar(u user.User) (av *Object, err error) {
+func (db *DB) GreateAvatar(uid uint32, name string) (av *Object, err error) {
 	ctx := context.Background()
 	tx, err := db.pool.Begin(ctx)
 	if err != nil {
@@ -265,19 +201,14 @@ func (db *pgDB) GreateAvatar(u user.User) (av *Object, err error) {
 	}
 	defer tx.Rollback(ctx)
 
-	av = &Object{}
-	stmt := `
-	SELECT id, avatar, data, owneruid, script FROM objects 
-	WHERE avatar = true AND owneruid = $1`
-	err = db.pool.QueryRow(context.Background(), stmt, u.Uid).Scan(
-		&av.ID, &av.Avatar, &av.Data, &av.OwnerID, &av.Script)
+	av, err = db.GetAvatarForUid(uid)
 	// TODO actually check error. for now assuming it means does not exist
 	if err == nil {
 		return
 	}
 
 	data := map[string]string{}
-	data["name"] = u.Username
+	data["name"] = name
 	data["description"] = fmt.Sprintf("a gaseous form. it smells faintly of %s.", randSmell())
 	av = &Object{
 		Avatar: true,
@@ -295,8 +226,8 @@ sees(".*", function()
 end)
 `, hasInvocation(av))
 
-	stmt = "INSERT INTO objects ( avatar, data, owneruid, script ) VALUES ( $1, $2, $3, $4 ) RETURNING id"
-	err = tx.QueryRow(ctx, stmt, av.Avatar, av.Data, u.Uid, av.Script).Scan(&av.ID)
+	stmt := "INSERT INTO objects ( avatar, data, owneruid, script ) VALUES ( $1, $2, $3, $4 ) RETURNING id"
+	err = tx.QueryRow(ctx, stmt, av.Avatar, av.Data, uid, av.Script).Scan(&av.ID)
 	if err != nil {
 		return
 	}
@@ -317,7 +248,7 @@ end)
 	}
 
 	stmt = "INSERT INTO objects ( bedroom, data, owneruid, script ) VALUES ( $1, $2, $3, $4 ) RETURNING id"
-	err = tx.QueryRow(ctx, stmt, bedroom.Bedroom, bedroom.Data, u.Uid, bedroom.Script).Scan(&bedroom.ID)
+	err = tx.QueryRow(ctx, stmt, bedroom.Bedroom, bedroom.Data, uid, bedroom.Script).Scan(&bedroom.ID)
 	if err != nil {
 		return
 	}
@@ -336,199 +267,31 @@ end)
 	return
 }
 
-func (db *pgDB) createAccount(account *Account) (err error) {
-	ctx := context.Background()
-	tx, err := db.pool.Begin(ctx)
-	if err != nil {
-		return
-	}
-
-	defer tx.Rollback(ctx)
-
-	stmt := "INSERT INTO accounts (name, pwhash, god) VALUES ( $1, $2, $3 ) RETURNING id"
-	err = tx.QueryRow(ctx, stmt, account.Name, account.Pwhash, account.God).Scan(&account.ID)
-	// TODO handle and cleanup unqiue violations
-	if err != nil {
-		return
-	}
-
-	data := map[string]string{}
-	data["name"] = account.Name
-	data["description"] = fmt.Sprintf("a gaseous form. it smells faintly of %s.", randSmell())
-	av := &Object{
-		Avatar: true,
-		Data:   data,
-		Script: "",
-	}
-
-	av.Script = fmt.Sprintf(`%s
-hears(".*", function()
-	tellMe(msg)
-end)
-
-sees(".*", function()
-	showMe(msg)
-end)
-`, hasInvocation(av))
-
-	stmt = "INSERT INTO objects ( avatar, data, owner, script ) VALUES ( $1, $2, $3, $4 ) RETURNING id"
-	err = tx.QueryRow(ctx, stmt, av.Avatar, av.Data, account.ID, av.Script).Scan(&av.ID)
-	if err != nil {
-		return
-	}
-
-	stmt = "INSERT INTO permissions (object) VALUES ( $1 )"
-	_, err = tx.Exec(ctx, stmt, av.ID)
-	if err != nil {
-		return
-	}
-
-	data = map[string]string{}
-	data["name"] = "your private bedroom"
-
-	bedroom := &Object{
-		Bedroom: true,
-		Data:    data,
-		Script:  "",
-	}
-
-	stmt = "INSERT INTO objects ( bedroom, data, owner, script ) VALUES ( $1, $2, $3, $4 ) RETURNING id"
-	err = tx.QueryRow(ctx, stmt, bedroom.Bedroom, bedroom.Data, account.ID, bedroom.Script).Scan(&bedroom.ID)
-	if err != nil {
-		return
-	}
-
-	stmt = "INSERT INTO permissions (object) VALUES ( $1 )"
-	_, err = tx.Exec(ctx, stmt, bedroom.ID)
-	if err != nil {
-		return
-	}
-
-	return tx.Commit(ctx)
-}
-
-func (db *pgDB) ValidateCredentials(name, password string) (*Account, error) {
-	a, err := db.GetAccount(name)
-	if err != nil {
-		return nil, err
-	}
-
-	if a.Pwhash == "" {
-		return nil, errors.New("this account cannot be logged into")
-	}
-
-	// TODO hashing lol
-
-	if a.Pwhash != password {
-		return nil, errors.New("invalid credentials")
-	}
-
-	return a, nil
-}
-
-func (db *pgDB) GetAccount(name string) (a *Account, err error) {
-	a = &Account{}
-	stmt := "SELECT id, name, pwhash FROM accounts WHERE name = $1"
-	err = db.pool.QueryRow(context.Background(), stmt, name).Scan(&a.ID, &a.Name, &a.Pwhash)
+func (db *DB) GetAvatarForUid(uid uint32) (av *Object, err error) {
+	av = &Object{}
+	stmt := `
+	SELECT id, avatar, data, owneruid, script FROM objects 
+	WHERE avatar = true AND owneruid = $1`
+	err = db.pool.QueryRow(context.Background(), stmt, uid).Scan(
+		&av.ID, &av.Avatar, &av.Data, &av.OwnerID, &av.Script)
 	return
 }
 
-func (db *pgDB) StartSession(a Account) (sid string, err error) {
-	sid = uuid.New().String()
-	_, err = db.pool.Exec(context.Background(),
-		"INSERT INTO sessions (id, account) VALUES ( $1, $2 )", sid, a.ID)
-	if err != nil {
-		return
-	}
-
-	// Clean up any ghosts to prevent avatar duplication
-	// TODO subquery
-	stmt := "DELETE FROM contains WHERE contained = (SELECT id FROM objects WHERE objects.avatar = true and objects.owner = $1)"
-	_, err = db.pool.Exec(context.Background(), stmt, a.ID)
-	if err != nil {
-		log.Printf("failed to clean up ghosts for %d: %s", a.ID, err.Error())
-		err = nil
-	}
-
-	return
-}
-
-func (db *pgDB) EndSession(sid string) (err error) {
-	if sid == "" {
-		log.Println("db.EndSession called with empty session id")
-		return
-	}
-
+func (db *DB) Derez(uid uint32) (err error) {
 	var o *Object
-	if o, err = db.AvatarBySessionID(sid); err == nil {
+	if o, err = db.GetAvatarForUid(uid); err == nil {
 		if _, err = db.pool.Exec(context.Background(),
 			"DELETE FROM contains WHERE contained = $1", o.ID); err != nil {
 			log.Printf("failed to remove avatar from room: %s", err.Error())
 		}
 	} else {
-		log.Printf("failed to find avatar for session %s: %s", sid, err.Error())
+		log.Printf("failed to find avatar for uid %d: %s", uid, err.Error())
 	}
-
-	_, err = db.pool.Exec(context.Background(), "DELETE FROM sessions WHERE id = $1", sid)
 
 	return
 }
 
-func (db *pgDB) SessionIDForAvatar(obj Object) (string, error) {
-	if !obj.Avatar {
-		return "", nil
-	}
-	ctx := context.Background()
-	stmt := `SELECT id FROM sessions WHERE account = $1`
-	var sid *string
-	var err error
-	if err = db.pool.QueryRow(ctx, stmt, obj.OwnerID).Scan(&sid); err != nil {
-		return "", err
-	}
-
-	if sid == nil {
-		return "", nil
-	}
-
-	return *sid, nil
-}
-
-func (db *pgDB) SessionIDForObjID(id int) (string, error) {
-	obj, err := db.GetObjectByID(id)
-	if err != nil {
-		return "", err
-	}
-
-	return db.SessionIDForAvatar(*obj)
-
-}
-
-func (db *pgDB) AvatarBySessionID(sid string) (avatar *Object, err error) {
-	avatar = &Object{}
-	// TODO subquery
-	stmt := `
-	SELECT id, avatar, data, owner, script
-	FROM objects WHERE avatar = true AND owner = (
-		SELECT a.id FROM sessions s JOIN accounts a ON s.account = a.id WHERE s.id = $1)`
-	err = db.pool.QueryRow(context.Background(), stmt, sid).Scan(
-		&avatar.ID, &avatar.Avatar, &avatar.Data, &avatar.OwnerID, &avatar.Script)
-	return
-}
-
-func (db *pgDB) BedroomBySessionID(sid string) (bedroom *Object, err error) {
-	bedroom = &Object{}
-
-	// TODO subquery
-	stmt := `
-	SELECT id, bedroom, data
-	FROM objects WHERE bedroom = true AND owner = (
-		SELECT a.id FROM sessions s JOIN accounts a ON s.account = a.id WHERE s.id = $1)`
-	err = db.pool.QueryRow(context.Background(), stmt, sid).Scan(
-		&bedroom.ID, &bedroom.Bedroom, &bedroom.Data)
-	return
-}
-
-func (db *pgDB) MoveInto(toMove Object, container Object) error {
+func (db *DB) MoveInto(toMove Object, container Object) error {
 	ctx := context.Background()
 	tx, err := db.pool.Begin(ctx)
 	if err != nil {
@@ -551,9 +314,9 @@ func (db *pgDB) MoveInto(toMove Object, container Object) error {
 	return tx.Commit(ctx)
 }
 
-func (db *pgDB) Earshot(obj Object) ([]Object, error) {
+func (db *DB) Earshot(obj Object) ([]Object, error) {
 	stmt := `
-	SELECT id, avatar, bedroom, data, owner, script FROM objects
+	SELECT id, avatar, bedroom, data, owneruid, script FROM objects
 	WHERE id IN (
 		SELECT contained FROM contains
 		WHERE container = (
@@ -580,11 +343,11 @@ func (db *pgDB) Earshot(obj Object) ([]Object, error) {
 	return out, nil
 }
 
-func (db *pgDB) GetObjectByID(ID int) (*Object, error) {
+func (db *DB) GetObjectByID(ID int) (*Object, error) {
 	ctx := context.Background()
 	obj := &Object{}
 	stmt := `
-		SELECT id, avatar, data, owner, script
+		SELECT id, avatar, data, owneruid, script
 		FROM objects
 		WHERE id = $1`
 	err := db.pool.QueryRow(ctx, stmt, ID).Scan(
@@ -592,25 +355,24 @@ func (db *pgDB) GetObjectByID(ID int) (*Object, error) {
 	return obj, err
 }
 
-// TODO fix arg
-func (db *pgDB) GetObject(owner, name string) (obj *Object, err error) {
+func (db *DB) GetObject(owneruid uint32, name string) (obj *Object, err error) {
 	ctx := context.Background()
 	obj = &Object{}
 	stmt := `
-		SELECT id, avatar, data, owner, script
+		SELECT id, avatar, data, owneruid, script
 		FROM objects
-		WHERE owner = (SELECT id FROM accounts WHERE name=$1) AND data['name'] = $2`
-	err = db.pool.QueryRow(ctx, stmt, owner, fmt.Sprintf(`"%s"`, name)).Scan(
+		WHERE owneruid = $1 AND data['name'] = $2`
+	err = db.pool.QueryRow(ctx, stmt, owneruid, fmt.Sprintf(`"%s"`, name)).Scan(
 		&obj.ID, &obj.Avatar, &obj.Data, &obj.OwnerID, &obj.Script)
 
 	return
 }
 
-func (db *pgDB) SearchObjectsByName(term string) ([]Object, error) {
+func (db *DB) SearchObjectsByName(term string) ([]Object, error) {
 	ctx := context.Background()
 
 	stmt := `
-		SELECT id, avatar, data, owner, script
+		SELECT id, avatar, data, owneruid, script
 		FROM objects
 		WHERE data['name']::varchar LIKE $1 
 	`
@@ -637,7 +399,7 @@ func (db *pgDB) SearchObjectsByName(term string) ([]Object, error) {
 	return out, nil
 }
 
-func (db *pgDB) Resolve(vantage Object, term string) ([]Object, error) {
+func (db *DB) Resolve(vantage Object, term string) ([]Object, error) {
 	stuff, err := db.Earshot(vantage)
 	if err != nil {
 		return nil, err
@@ -654,46 +416,12 @@ func (db *pgDB) Resolve(vantage Object, term string) ([]Object, error) {
 	return out, nil
 }
 
-func (db *pgDB) GetAccountAvatar(account Account) (*Object, error) {
-	ctx := context.Background()
-	obj := &Object{
-		OwnerID: account.ID,
-		Avatar:  true,
+func (db *DB) GhostBust() error {
+	stmt := "DELETE FROM contains WHERE contained = (SELECT id FROM objects WHERE objects.avatar)"
+	if _, err := db.pool.Exec(context.Background(), stmt); err != nil {
+		return fmt.Errorf("failed to bust ghosts: %w", err)
 	}
-	stmt := `
-		SELECT id, data, script
-		FROM objects
-		WHERE owner = $1 AND avatar IS true`
-	err := db.pool.QueryRow(ctx, stmt, account.ID).Scan(
-		&obj.ID, &obj.Data, &obj.Script)
-	if err != nil {
-		return nil, err
-	}
-
-	return obj, nil
-}
-
-func (db *pgDB) ActiveSessions() (out []Session, err error) {
-	stmt := `SELECT id, account FROM sessions`
-	rows, err := db.pool.Query(context.Background(), stmt)
-	if err != nil {
-		return
-	}
-
-	for rows.Next() {
-		s := Session{}
-		if err = rows.Scan(&s.ID, &s.AccountID); err != nil {
-			return
-		}
-		out = append(out, s)
-	}
-
-	return
-}
-
-func (db *pgDB) ClearSessions() (err error) {
-	_, err = db.pool.Exec(context.Background(), "DELETE FROM sessions")
-	return
+	return nil
 }
 
 func hasInvocation(obj *Object) string {
@@ -706,10 +434,10 @@ func hasInvocation(obj *Object) string {
 	return hi
 }
 
-func (db *pgDB) CreateObject(owner *Account, obj *Object) error {
+func (db *DB) CreateObject(owneruid uint32, obj *Object) error {
 	ctx := context.Background()
 	stmt := `
-		INSERT INTO objects (avatar, bedroom, data, script, owner)
+		INSERT INTO objects (avatar, bedroom, data, script, owneruid)
 		VALUES ( $1, $2, $3, $4, $5)
 		RETURNING id
 	`
@@ -717,7 +445,7 @@ func (db *pgDB) CreateObject(owner *Account, obj *Object) error {
 	obj.Script = hasInvocation(obj) + obj.Script
 
 	err := db.pool.QueryRow(ctx, stmt,
-		obj.Avatar, obj.Bedroom, obj.Data, obj.Script, owner.ID).Scan(
+		obj.Avatar, obj.Bedroom, obj.Data, obj.Script, owneruid).Scan(
 		&obj.ID)
 	if err != nil {
 		return err
@@ -727,10 +455,9 @@ func (db *pgDB) CreateObject(owner *Account, obj *Object) error {
 }
 
 func randSmell() string {
-	// TODO seeding
 	smells := []string{
 		"lavender",
-		"wet soil",
+		"petrichor",
 		"juniper",
 		"pine sap",
 		"wood smoke",
