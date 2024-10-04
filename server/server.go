@@ -96,6 +96,8 @@ func Serve(opts ServeOpts) error {
 	}
 	defer l.Close()
 
+	os.Chmod(sockAddr, 0777) // frisson
+
 	gs := grpc.NewServer(grpc.Creds(&ServerAuthCredentials{}))
 	s, err := newServer()
 	if err != nil {
