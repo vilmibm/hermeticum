@@ -297,7 +297,6 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 		case err := <-uio.errs:
 			log.Printf("error in stream for %d: %s", uid, err.Error())
 		case <-uio.done:
-			log.Println("GOT A DONE")
 			return nil
 		}
 	}
