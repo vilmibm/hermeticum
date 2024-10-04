@@ -224,6 +224,10 @@ end)
 sees(".*", function()
 	showMe(msg)
 end)
+
+seen(function()
+	tellSender(my("description"))
+end)
 `, hasInvocation(av))
 
 	stmt := "INSERT INTO objects ( avatar, data, owneruid, script ) VALUES ( $1, $2, $3, $4 ) RETURNING id"
