@@ -254,12 +254,12 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 		s.sessionMutex.Lock()
 		delete(s.sessions, uid)
 		s.sessionMutex.Unlock()
-		s.db.Derez(uid)
 		affected, err := s.db.Earshot(*avatar)
 		if err != nil {
 			log.Printf("error trying to inform others about a derez: %s", err.Error())
 			return
 		}
+		s.db.Derez(uid)
 
 		for _, obj := range affected {
 			if obj.Avatar {
