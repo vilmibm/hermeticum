@@ -32,7 +32,7 @@ end)
 */
 
 type serverAPI struct {
-	db         db.DB
+	db         *db.DB
 	clientSend func(uint32, *proto.WorldEvent)
 }
 
@@ -101,7 +101,7 @@ func (s *serverAPI) Show(fromObjID, toObjID int, action string) {
 	s.clientSend(uint32(to.OwnerID), &ev)
 }
 
-func (s *serverAPI) DB() db.DB {
+func (s *serverAPI) DB() *db.DB {
 	return s.db
 }
 
@@ -113,14 +113,14 @@ type VerbContext struct {
 }
 
 type ScriptContext struct {
-	db         db.DB
+	db         *db.DB
 	clientSend func(uint32, *proto.WorldEvent)
 	script     string
 	incoming   chan VerbContext
 	serverAPI  serverAPI
 }
 
-func NewScriptContext(db db.DB, clientSend func(uint32, *proto.WorldEvent)) (*ScriptContext, error) {
+func NewScriptContext(db *db.DB, clientSend func(uint32, *proto.WorldEvent)) (*ScriptContext, error) {
 	sc := &ScriptContext{
 		serverAPI: serverAPI{db: db, clientSend: clientSend},
 		db:        db,
@@ -185,29 +185,32 @@ func NewScriptContext(db db.DB, clientSend func(uint32, *proto.WorldEvent)) (*Sc
 				return 0
 			}))
 
-			l.SetGlobal("moveSender", l.NewFunction(func(l *lua.LState) (ret int) {
-				ret = 0
-				sender := l.GetGlobal("sender").(*lua.LTable)
-				senderID := int(lua.LVAsNumber(sender.RawGetString("ID")))
-				owner := l.ToString(1)
-				name := l.ToString(2)
-				db := sc.db
-				senderObj, err := db.GetObjectByID(senderID)
-				if err != nil {
-					log.Println(err.Error())
-					return
-				}
-				container, err := db.GetObject(owner, name)
-				if err != nil {
-					log.Println(err.Error())
-					return
-				}
-				if err = db.MoveInto(*senderObj, *container); err != nil {
-					log.Println(err.Error())
-				}
+			// TODO commenting this out until I decide on UX for object short coding
+			/*
+				l.SetGlobal("moveSender", l.NewFunction(func(l *lua.LState) (ret int) {
+					ret = 0
+					sender := l.GetGlobal("sender").(*lua.LTable)
+					senderID := int(lua.LVAsNumber(sender.RawGetString("ID")))
+					owner := l.ToString(1)
+					name := l.ToString(2)
+					db := sc.db
+					senderObj, err := db.GetObjectByID(senderID)
+					if err != nil {
+						log.Println(err.Error())
+						return
+					}
+					container, err := db.GetObject(owner, name)
+					if err != nil {
+						log.Println(err.Error())
+						return
+					}
+					if err = db.MoveInto(*senderObj, *container); err != nil {
+						log.Println(err.Error())
+					}
 
-				return
-			}))
+					return
+				}))
+			*/
 
 			l.SetGlobal("showMe", l.NewFunction(func(l *lua.LState) int {
 				sender := l.GetGlobal("sender").(*lua.LTable)
