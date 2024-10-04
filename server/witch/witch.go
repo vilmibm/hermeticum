@@ -332,34 +332,23 @@ func (sc *ScriptContext) wProvides(l *lua.LState) int {
 }
 
 func (sc *ScriptContext) wGoes(l *lua.LState) int {
-	direction := NewDirection(l.ToString(1))
-	targetRoomTerm := l.ToString(2)
+	direction := newDirection(l.ToString(1))
+	targetRoomID := l.ToInt(2)
 
 	log.Printf("GOT DIRECTION %v", direction)
 
 	cb := func(l *lua.LState) (ret int) {
-		targetRoomList, err := sc.db.SearchObjectsByName(targetRoomTerm)
+		targetRoom, err := sc.db.GetObjectByID(targetRoomID)
 		if err != nil {
-			log.Printf("failed to search for target room: %s", err.Error())
+			log.Printf("failed to find room %s", err.Error())
 			return
 		}
-		switch len(targetRoomList) {
-		case 0:
-			log.Printf("failed to find any matching target room. tell player somehow")
-			return
-		case 1:
-			log.Printf("found the target room")
-		default:
-			log.Printf("found too many matching target rooms. tell player somehow")
-			return
-		}
-
-		targetRoom := targetRoomList[0]
 		msg := l.GetGlobal("msg").String()
-		normalized, err := NormalizeDirection(msg)
-		if err != nil {
+		if !ValidDirection(msg) {
+			log.Printf("invalid direction in cb %s", msg)
 			return
 		}
+		normalized := NormalizeDirection(msg)
 
 		sender, err := sc.getSenderFromState(l)
 		if err != nil {
@@ -370,7 +359,7 @@ func (sc *ScriptContext) wGoes(l *lua.LState) int {
 		if normalized.Equals(direction) {
 			log.Printf("MOVING SENDER TO '%s'", targetRoom.Data["name"])
 			// TODO error checking
-			sc.db.MoveInto(*sender, targetRoom)
+			sc.db.MoveInto(*sender, *targetRoom)
 			sc.serverAPI.Tell(targetRoom.ID, sender.ID, fmt.Sprintf("you are now in %s", targetRoom.Data["name"]))
 		}
 		return

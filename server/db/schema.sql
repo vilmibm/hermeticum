@@ -24,5 +24,3 @@ CREATE TABLE contains (
   container integer REFERENCES objects ON DELETE RESTRICT,
   contained integer REFERENCES objects ON DELETE CASCADE
 );
-
-CREATE TYPE heading AS ENUM ('north', 'south', 'east', 'west', 'above', 'below');

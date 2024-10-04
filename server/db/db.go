@@ -110,7 +110,7 @@ func (db *DB) Ensure() error {
 
 	// TODO for some reason, when the seen() callback runs for foyer we're calling the stub Tell instead of the sid-closured Tell. figure out why.
 
-	roomScript := `
+	seenScript := `
 		seen(function()
 			tellSender(my("description"))
 		end)
@@ -124,7 +124,7 @@ func (db *DB) Ensure() error {
 		data["description"] = "a big room. the ceiling is painted with constellations."
 		foyer = &Object{
 			Data:   data,
-			Script: roomScript,
+			Script: seenScript,
 		}
 		if err = db.CreateObject(rootuid, foyer); err != nil {
 			return err
@@ -139,7 +139,7 @@ func (db *DB) Ensure() error {
 		data["description"] = "it's an egg and it's on the floor."
 		egg = &Object{
 			Data:   data,
-			Script: "",
+			Script: seenScript,
 		}
 		if err = db.CreateObject(rootuid, egg); err != nil {
 			return err
@@ -154,7 +154,7 @@ func (db *DB) Ensure() error {
 		data["description"] = "a warm pub constructed of hard wood and brass"
 		pub = &Object{
 			Data:   data,
-			Script: roomScript,
+			Script: seenScript,
 		}
 		if err = db.CreateObject(rootuid, pub); err != nil {
 			return err
@@ -169,12 +169,30 @@ func (db *DB) Ensure() error {
 		data["description"] = "a heavy oak door with a brass handle. an ornate sign says PUB."
 		oakDoor = &Object{
 			Data: data,
-			Script: `
+			Script: seenScript + fmt.Sprintf(`
 				provides("get tetanus", function(args)
 					tellSender("you now have tetanus")
 				end)
-				goes(north, "pub")
-			`,
+
+				goes(north, %d)
+			`, pub.ID),
+		}
+		if err = db.CreateObject(rootuid, oakDoor); err != nil {
+			return err
+		}
+	}
+
+	oakDoorReverse, err := db.GetObject(rootuid, "exit oak door")
+	if err != nil {
+		// TODO actually check error. for now assuming it means does not exist
+		data := map[string]string{}
+		data["name"] = "exit oak door"
+		data["description"] = "a heavy oak door with a brass handle. an ornate sign says EXIT."
+		oakDoor = &Object{
+			Data: data,
+			Script: seenScript + fmt.Sprintf(`
+				goes(south, %d)
+			`, foyer.ID),
 		}
 		if err = db.CreateObject(rootuid, oakDoor); err != nil {
 			return err
@@ -189,6 +207,7 @@ func (db *DB) Ensure() error {
 	db.MoveInto(*sysAva, *foyer)
 	db.MoveInto(*egg, *foyer)
 	db.MoveInto(*oakDoor, *foyer)
+	db.MoveInto(*oakDoorReverse, *pub)
 
 	return nil
 }
@@ -211,9 +230,10 @@ func (db *DB) GreateAvatar(uid uint32, name string) (av *Object, err error) {
 	data["name"] = name
 	data["description"] = fmt.Sprintf("a gaseous form. it smells faintly of %s.", randSmell())
 	av = &Object{
-		Avatar: true,
-		Data:   data,
-		Script: "",
+		Avatar:  true,
+		Data:    data,
+		Script:  "",
+		OwnerID: int(uid),
 	}
 
 	av.Script = fmt.Sprintf(`%s
@@ -268,6 +288,17 @@ end)
 		return
 	}
 
+	return
+}
+
+func (db *DB) ContainerFor(o Object) (oo *Object, err error) {
+	oo = &Object{}
+	stmt := `
+		SELECT id, avatar, data, owneruid, script FROM objects
+		WHERE id IN (SELECT container FROM contains WHERE contained = $1)
+	`
+	err = db.pool.QueryRow(context.Background(), stmt, o.ID).Scan(
+		&oo.ID, &oo.Avatar, &oo.Data, &oo.OwnerID, &oo.Script)
 	return
 }
 

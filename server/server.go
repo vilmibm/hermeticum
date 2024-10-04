@@ -21,6 +21,31 @@ import (
 	"google.golang.org/grpc/peer"
 )
 
+/*
+
+I want dig to exist. what should happen?
+
+/dig north
+There is already a room in that direction.
+/go north
+You are in the empty field.
+/dig north
+You have breathed life into a new object! Its true name is 12345
+/edit 12345
+
+($EDITOR opens with witch code, user edits)
+
+"edit" will have to be a specially noted client command that ultimately sends a cmd to the server like:
+
+Cmd{verb: "edit", "rest": newcode}
+
+perhaps first it could send Cmd{verb: "lock", "rest": objid}
+
+and the edit handler does the update and unlock
+
+so to start, let's support 'dig'.
+*/
+
 type ServeOpts struct {
 }
 
@@ -105,7 +130,6 @@ func Serve(opts ServeOpts) error {
 	}
 
 	proto.RegisterGameWorldServer(gs, s)
-	log.Println("i'm starting")
 	log.Printf("sock address: %s", sockAddr)
 	gs.Serve(l)
 
@@ -207,9 +231,7 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 		return errors.New("failed to cast PeerAuthInfo")
 	}
 	uid := pai.ucred.Uid
-	gid := pai.ucred.Gid
-
-	fmt.Println(uid, gid)
+	// gid := pai.ucred.Gid TODO staff powers
 
 	if _, ok := s.sessions[uid]; ok {
 		return fmt.Errorf("existing session for %d", uid)
@@ -225,7 +247,7 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 		return fmt.Errorf("failed to get or create avatar for %d: %w", uid, err)
 	}
 
-	fmt.Println(avatar)
+	log.Printf("uid %d connected", uid)
 
 	uio := &userIO{
 		inbound:  make(chan *proto.Command),
@@ -303,14 +325,24 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 	for {
 		select {
 		case cmd := <-uio.inbound:
-			log.Printf("verb %s from uid %d", cmd.Verb, uid)
-			if cmd.Verb == "quit" || cmd.Verb == "q" {
+			log.Printf("cmd %s %s from uid %d", cmd.Verb, cmd.Rest, uid)
+			switch cmd.Verb {
+			case "quit":
 				uio.done <- true
-			} else {
-				err := s.handleCmd(*avatar, cmd)
-				if err != nil {
-					uio.errs <- err
-				}
+			case "dig":
+				go func() {
+					err = s.handleDig(*avatar, cmd)
+					if err != nil {
+						uio.errs <- err
+					}
+				}()
+			default:
+				go func() {
+					err = s.handleCmd(*avatar, cmd)
+					if err != nil {
+						uio.errs <- err
+					}
+				}()
 			}
 		case ev := <-uio.outbound:
 			if err := stream.Send(ev); err != nil {
@@ -322,6 +354,95 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 			return nil
 		}
 	}
+}
+
+func (s *gameWorldServer) handleDig(avatar db.Object, cmd *proto.Command) error {
+	uid := uint32(avatar.OwnerID)
+	heading := cmd.Rest
+	if !witch.ValidDirection(heading) {
+		msg := fmt.Sprintf("sorry, %s is not a valid heading. valid headings are: %v", heading,
+			witch.Directions())
+
+		s.sessions[uid].outbound <- &proto.WorldEvent{
+			Type: proto.WorldEvent_PRINT,
+			Text: &msg,
+		}
+	}
+	dir := witch.NormalizeDirection(heading)
+
+	currentRoom, err := s.db.ContainerFor(avatar)
+	if err != nil {
+		return err
+	}
+
+	seenScript := `
+			seen(function()
+				tellSender(my("description"))
+			end)`
+
+	room := db.Object{
+		Data: map[string]string{
+			"name":        "construction site",
+			"description": "a pit of moist dirt and rubble. surely it will become something",
+		},
+		Script: seenScript,
+	}
+
+	err = s.db.CreateObject(uid, &room)
+	if err != nil {
+		return err
+	}
+
+	desc := "a simple wooden gate on a hinge"
+	name := "small gate"
+	log.Printf("%#v", dir)
+	if dir.IsVertical() {
+		desc = "a basic wooden ladder. it's a little rickety."
+		name = "ladder"
+	}
+
+	door := db.Object{
+		Data: map[string]string{
+			"name":        name,
+			"description": desc,
+		},
+		Script: fmt.Sprintf(seenScript+`
+			goes(%s, %d)
+		`, heading, room.ID),
+	}
+
+	err = s.db.CreateObject(uid, &door)
+	if err != nil {
+		return err
+	}
+
+	revDoor := db.Object{
+		Data: map[string]string{
+			"name":        name,
+			"description": desc,
+		},
+		Script: fmt.Sprintf(seenScript+`
+			goes(%s, %d)
+		`, dir.Reverse().Human(), currentRoom.ID),
+	}
+
+	err = s.db.CreateObject(uid, &revDoor)
+	if err != nil {
+		return err
+	}
+
+	err = s.db.MoveInto(door, *currentRoom)
+	if err != nil {
+		return err
+	}
+
+	err = s.db.MoveInto(revDoor, room)
+	if err != nil {
+		return err
+	}
+
+	// TODO inform user about some things?
+	return nil
 }
 
 func (s *gameWorldServer) handleCmd(avatar db.Object, cmd *proto.Command) error {
