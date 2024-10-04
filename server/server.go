@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/user"
+	"strconv"
 	"sync"
 	"time"
 
@@ -231,6 +232,17 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 		done:     make(chan bool),
 	}
 
+	rootu, err := user.Lookup("root")
+	if err != nil {
+		return err
+	}
+	ruid, err := strconv.Atoi(rootu.Uid)
+	if err != nil {
+		return err
+	}
+
+	rootuid := uint32(ruid)
+
 	s.sessionMutex.Lock()
 	s.sessions[uid] = uio
 	s.sessionMutex.Unlock()
@@ -254,7 +266,7 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 		}
 	}()
 
-	foyer, err := s.db.GetObject("system", "foyer")
+	foyer, err := s.db.GetObject(rootuid, "foyer")
 	if err != nil {
 		return fmt.Errorf("failed to find foyer: %w", err)
 	}

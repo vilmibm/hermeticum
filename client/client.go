@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -23,55 +22,22 @@ type ConnectOpts struct {
 type ClientState struct {
 	App          *tview.Application
 	Client       proto.GameWorldClient
-	SessionInfo  *proto.SessionInfo
 	MaxMessages  int
 	messagesView *tview.TextView
-	messages     []*proto.ClientMessage
-	cmdStream    proto.GameWorld_CommandsClient
-}
-
-func (cs *ClientState) Messages() error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	stream, err := cs.Client.Messages(ctx, cs.SessionInfo)
-	if err != nil {
-		return err
-	}
-
-	for {
-		msg, err := stream.Recv()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return err
-		}
-		cs.AddMessage(msg)
-	}
-
-	return nil
+	events       []*proto.WorldEvent
+	cio          *clientIO
 }
 
 func (cs *ClientState) HandleSIGINT(sigC chan os.Signal) {
 	for range sigC {
-		cm := &proto.Command{
-			SessionInfo: cs.SessionInfo,
-			Verb:        "quit",
+		cmd := &proto.Command{
+			Verb: "quit",
 		}
-		err := cs.cmdStream.Send(cm)
-		if err != nil {
-			fmt.Printf("failed to send quit verb to server: %s\n", err.Error())
-		}
-		_, err = cs.cmdStream.Recv()
-		if err != nil {
-			fmt.Printf("failed to receive an ACK from server: %s\n", err.Error())
-		}
-
-		cs.App.Stop()
+		cs.cio.outbound <- cmd
 	}
 }
 
-func (cs *ClientState) HandleInput(input string) error {
+func (cs *ClientState) HandleInput(input string) {
 	var verb string
 	rest := input
 	if strings.HasPrefix(input, "/") {
@@ -80,55 +46,39 @@ func (cs *ClientState) HandleInput(input string) error {
 		verb = "say"
 	}
 	cmd := &proto.Command{
-		SessionInfo: cs.SessionInfo,
-		Verb:        verb,
-		Rest:        rest,
+		Verb: verb,
+		Rest: rest,
 	}
-	// TODO I'm punting on handling CommandAcks for now but it will be a nice UX thing later for showing connectivity problems
-	err := cs.cmdStream.Send(cmd)
-	if err != nil {
-		return err
-	}
-	_, err = cs.cmdStream.Recv()
-	if err != nil {
-		fmt.Printf("failed to receive an ACK from server: %s\n", err.Error())
-	}
-	if verb == "quit" || verb == "q" {
-		cs.App.Stop()
-	}
-	return nil
+	cs.cio.outbound <- cmd
 }
 
-func (cs *ClientState) InitCommandStream() error {
-	ctx := context.Background()
-	stream, err := cs.Client.Commands(ctx)
-	if err != nil {
-		return err
-	}
-	cs.cmdStream = stream
-	return nil
-}
-
-func (cs *ClientState) AddMessage(msg *proto.ClientMessage) {
+func (cs *ClientState) AddMessage(ev *proto.WorldEvent) {
 	// TODO i don't like this function
-	cs.messages = append(cs.messages, msg)
-	if len(cs.messages) > cs.MaxMessages {
-		cs.messages = cs.messages[1 : len(cs.messages)-1]
+	cs.events = append(cs.events, ev)
+	if len(cs.events) > cs.MaxMessages {
+		cs.events = cs.events[1 : len(cs.events)-1]
 	}
 
 	// TODO look into using the SetChangedFunc thing.
 	cs.App.QueueUpdateDraw(func() {
 		// TODO trim content of messagesView /or/ see if tview has a buffer size that does it for me. use cs.messages to re-constitute.
-		switch msg.Type {
-		case proto.ClientMessage_OVERHEARD:
-			fmt.Fprintf(cs.messagesView, "%s: %s\n", msg.GetSpeaker(), msg.GetText())
-		case proto.ClientMessage_EMOTE:
-			fmt.Fprintf(cs.messagesView, "%s %s\n", msg.GetSpeaker(), msg.GetText())
+		switch ev.Type {
+		case proto.WorldEvent_OVERHEARD:
+			fmt.Fprintf(cs.messagesView, "%s: %s\n", ev.GetSource(), ev.GetText())
+		case proto.WorldEvent_EMOTE:
+			fmt.Fprintf(cs.messagesView, "%s %s\n", ev.GetSource(), ev.GetText())
 		default:
-			fmt.Fprintf(cs.messagesView, "%#v\n", msg)
+			fmt.Fprintf(cs.messagesView, "%#v\n", ev)
 		}
 		cs.messagesView.ScrollToEnd()
 	})
+}
+
+type clientIO struct {
+	inbound  chan *proto.WorldEvent
+	outbound chan *proto.Command
+	errs     chan error
+	done     chan bool
 }
 
 func Connect(opts ConnectOpts) error {
@@ -145,20 +95,24 @@ func Connect(opts ConnectOpts) error {
 	// TODO rename this, like, UI
 	cs := &ClientState{
 		App:         app,
-		SessionInfo: &proto.SessionInfo{},
 		Client:      client,
 		MaxMessages: 15, // TODO for testing
-		messages:    []*proto.ClientMessage{},
+		events:      []*proto.WorldEvent{},
 	}
-	err = cs.InitCommandStream()
-	if err != nil {
-		return fmt.Errorf("could not create command stream: %w", err)
+
+	cio := &clientIO{
+		inbound:  make(chan *proto.WorldEvent),
+		outbound: make(chan *proto.Command),
+		errs:     make(chan error),
+		done:     make(chan bool),
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if _, err = cs.Client.Ping(ctx, cs.SessionInfo); err != nil {
+	now := fmt.Sprintf("%d", time.Now().Unix())
+
+	if _, err = cs.Client.Ping(context.Background(), &proto.PingMsg{When: now}); err != nil {
 		log.Fatalf("%v.Ping -> %v", cs.Client, err)
 	}
 
@@ -168,7 +122,7 @@ func Connect(opts ConnectOpts) error {
 		// TODO command history
 		commandInput.SetText("")
 		// TODO do i need to clear the input's text?
-		go cs.HandleInput(input)
+		cs.HandleInput(input)
 	}
 
 	commandInput.SetDoneFunc(handleInput)
@@ -201,6 +155,46 @@ func Connect(opts ConnectOpts) error {
 	pages := tview.NewPages()
 	pages.AddPage("game", gamePage, true, true)
 
-	//return app.SetRoot(pages, true).SetFocus(pages).Run()
-	return app.SetRoot(pages, true).SetFocus(commandInput).Run()
+	stream, err := cs.Client.ClientInput(ctx)
+	if err != nil {
+		return fmt.Errorf("could not create command stream: %w", err)
+	}
+
+	go func() {
+		for {
+			if ev, err := stream.Recv(); err != nil {
+				cio.errs <- err
+				cio.done <- true
+			} else {
+				cio.inbound <- ev
+			}
+		}
+	}()
+
+	go func() {
+		err := app.SetRoot(pages, true).SetFocus(commandInput).Run()
+		if err != nil {
+			cio.errs <- err
+			cio.done <- true
+		}
+	}()
+
+	for {
+		select {
+		case ev := <-cio.inbound:
+			cs.AddMessage(ev)
+		case cmd := <-cio.outbound:
+			if err := stream.Send(cmd); err != nil {
+				cio.errs <- err
+			}
+			if cmd.Verb == "quit" {
+				cio.done <- true
+			}
+		case err := <-cio.errs:
+			log.Printf("error: %s", err.Error())
+		case <-cio.done:
+			cs.App.Stop()
+			return nil
+		}
+	}
 }
