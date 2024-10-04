@@ -18,59 +18,102 @@ these are mostly recreated below with the TODO of deciding on revision/object st
 
 */
 
+/*
+   in the dusting off, i'm switching to socket only + peer authentication.
+
+   I do need a way to start a session -- basically Login but that word feels wrong now.
+
+   Perhaps ClientConnect?
+
+   Do I even need this? I can notice the lack of a session for a given user on
+   a command.
+
+   So there's an avatar in a room and it hears something. We need to get to a
+   send function to send a message to the human associated with that avatar
+   who, presumably, has a client open. we also need to de-rez avatars when
+   humans close the client.
+
+   in the world of peer creds we have a UID as part of the handshake. We can
+   associate a UID with an avatar object and a  send func in memory.
+
+   look up objects in room -> see avatar -> get UID for avatar -> check RAM for entry in sessions map -> send them a message.
+
+   client quits (or we try to send to it and it fails) -> remove UID from sessions map.
+
+   I can't think of a need for a sessionID nor can I think of a need to store
+   sessionIDs in the DB.
+
+   Given that:
+
+   1. UIDs can only have one active session
+   2. a UID is associated with an avatar
+   3. UIDs are mapped to client streams in RAM
+
+   there's no need for a session ID.
+
+   This leaves the question of how the client should indicate to the server
+   that it's ready to have an avatar rez in.
+
+   But then; I can't see how to get the peer info from the Commands stream
+   because there is no context. But that got me thinking: why is Commands even
+   a stream? I assume things are fast enough to just have every press of
+   <enter> on the client do a unary RPC call. If there is non trivial overheard
+   there then, yeah, I guess a stream makes sense.
+
+   What I've done here, bafflingly, is recreate the experience of a bidirectional stream.
+
+   Commands(stream Command) lets the client send message after message.
+   Messages(si) -> stream ClientMessage
+
+   this could be Commands(stream ClientInput) returns (stream ClientMessage)
+
+   aha - the stream has a .Context() method. That explains that.
+
+   So I could have one endpoint -- Commands -- that is bidirectional, receiving input from a player and sending messages or state updates for the user to be shown.
+
+   On connect, we pull peercred and do bookkeeping:
+
+   - is there an avatar associated with this UID? If not, create one. If so, get it from DB.
+   - is there already an entry in the sessions map for the UID? if so, send
+   message about that and early exit
+   - if not, create an entry in the sessions map that can be used to send
+   messages to the client; find other objects nearby and tell them about appearance of user
+   - send message to client about opening eyes etc
+
+*/
+
 service GameWorld {
-  rpc Register(AuthInfo) returns (SessionInfo);
-  rpc Login(AuthInfo) returns (SessionInfo);
-  rpc Commands(stream Command) returns (stream CommandAck);
-  rpc State(SessionInfo) returns (stream StateUpdate);
-  rpc Messages(SessionInfo) returns (stream ClientMessage);
-  rpc Map(SessionInfo) returns (MapData);
-  rpc Ping(SessionInfo) returns (Pong);
-  // TODO decide on how revisions / object editing in general should work
+  rpc ClientInput(stream Command) returns (stream WorldEvent);
+  rpc Ping(PingMsg) returns (Pong);
 }
 
-message AuthInfo {
-  string username = 1;
-  string password = 2;
-}
-
-message SessionInfo {
-  string sessionID = 1;
-}
-
-message StateUpdate {
-  // TODO
+message PingMsg {
+  string when = 1; // when the client created the ping payload
 }
 
 message Command {
-  SessionInfo sessionInfo = 1;
-  string verb = 2;
-  string rest = 3;
+  string verb = 1;
+  string rest = 2;
 }
 
-message CommandAck {
-    bool acked = 1;
-    string errorMsg = 2;
-}
-
-message ClientMessage {
-  enum ClientMessageType {
+message WorldEvent {
+  enum WorldEventType {
     WHISPER = 0;   // someone or something sent a private message to user
     OVERHEARD = 1; // someone or something in the same room said something out loud
     EMOTE = 2;     // someone or something in the same room performed an action
-    GENERIC = 3;   // just a string that should be printed (ie, "you hear noises in a nearby room")
+    PRINT = 3;     // just a string that should be printed (ie, "you hear noises in a nearby room")
     GLOBAL = 4;    // the system sent out a PSA
+    SHOUT = 5;     // a user spammed the world
+    ENTER = 6;     // someone or something has appeared in room
+    LEAVE = 7;     // someone or something has left room
   }
 
-  ClientMessageType type = 1;
-  optional string speaker = 2;
-  string text = 3;
-}
-
-message MapData {
-  string mapData = 1;
+  WorldEventType type = 1;
+  optional string source = 2;
+  optional string text = 3;
 }
 
 message Pong {
   string when = 1; // timestamp of pong creation
+  string delta = 2; // timestamp of delta between pingmsg.when and its receipt
 }

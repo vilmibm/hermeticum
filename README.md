@@ -44,4 +44,3 @@ I haven't moved over any design docs or notes or anything like that. Refer to th
 ## development
 
 - to regenerate the API code: `protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative proto/hermeticum.proto`
-- database connection currently hardcoded to a postgresql database called `hermeticum` owned by `vilmibm` who has pw `vilmibm`. if you want to hack on this locally, update the call to `NewDB` accordingly. Eventually this will be handled via environment variables.

@@ -2,11 +2,14 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
 	"os"
+	"os/user"
 	"sync"
+	"time"
 
 	"github.com/vilmibm/hermeticum/proto"
 	"github.com/vilmibm/hermeticum/server/db"
@@ -109,15 +112,14 @@ func Serve(opts ServeOpts) error {
 type gameWorldServer struct {
 	proto.UnimplementedGameWorldServer
 
-	db             db.DB
-	msgRouterMutex sync.Mutex
-	msgRouter      map[string]func(*proto.ClientMessage) error
-	scripts        map[int]*witch.ScriptContext
-	scriptsMutex   sync.RWMutex
+	db           db.DB
+	sessions     map[uint32]*userIO
+	sessionMutex sync.Mutex
+	scripts      map[int]*witch.ScriptContext
+	scriptsMutex sync.RWMutex
 }
 
 func newServer() (*gameWorldServer, error) {
-	// TODO audit and clean up all of this
 	db, err := db.NewDB()
 	if err != nil {
 		return nil, err
@@ -126,12 +128,13 @@ func newServer() (*gameWorldServer, error) {
 		return nil, fmt.Errorf("failed to ensure default entities: %w", err)
 	}
 
+	// TODO what should this do -- probably clear avatars from any rooms
 	if err = db.ClearSessions(); err != nil {
 		return nil, fmt.Errorf("could not clear sessions: %w", err)
 	}
 
 	s := &gameWorldServer{
-		msgRouter:    make(map[string]func(*proto.ClientMessage) error),
+		sessions:     make(map[uint32]*userIO),
 		db:           db,
 		scripts:      make(map[int]*witch.ScriptContext),
 		scriptsMutex: sync.RWMutex{},
@@ -148,6 +151,7 @@ func (s *gameWorldServer) verbHandler(verb, rest string, sender, target db.Objec
 	s.scriptsMutex.RUnlock()
 	var err error
 
+	// TODO
 	getSend := func(sid string) func(*proto.ClientMessage) error {
 		return s.msgRouter[sid]
 	}
@@ -174,203 +178,131 @@ func (s *gameWorldServer) verbHandler(verb, rest string, sender, target db.Objec
 	return nil
 }
 
-func (s *gameWorldServer) HandleCmd(verb, rest string, sender *db.Object) {
-	// TODO
+type userIO struct {
+	inbound  chan *proto.Command
+	outbound chan *proto.WorldEvent
+	errs     chan error
+	done     chan bool
 }
 
-func (s *gameWorldServer) endSession(sid string) {
-	var err error
-	var avatar *db.Object
-	log.Printf("ending session %s", sid)
-
-	avatar, err = s.db.AvatarBySessionID(sid)
-	if err != nil {
-		log.Printf("error while ending session %s: %s", sid, err.Error())
-	} else {
-		s.scriptsMutex.Lock()
-		delete(s.scripts, avatar.ID)
-		s.scriptsMutex.Unlock()
-	}
-
-	if err = s.db.EndSession(sid); err != nil {
-		log.Printf("error while ending session %s: %s", sid, err.Error())
-	}
-
-	delete(s.msgRouter, sid)
-
-}
-
-func (s *gameWorldServer) Commands(stream proto.GameWorld_CommandsServer) error {
-	var sid string
-	var cmd *proto.Command
-	var err error
-	var avatar *db.Object
-	var send func(*proto.ClientMessage) error
-	var affected []db.Object
-	var o db.Object
-	for {
-		if cmd, err = stream.Recv(); err != nil {
-			log.Printf("commands stream closed with error: %s", err.Error())
-			return err
-		}
-
-		if sid == "" {
-			sid = cmd.SessionInfo.SessionID
-			defer s.endSession(sid)
-		}
-
-		if err = stream.Send(&proto.CommandAck{
-			Acked: true,
-		}); err != nil {
-			log.Printf("unable to ack command in session %s", sid)
-			return err
-		}
-
-		if send == nil {
-			log.Printf("saving a send fn for session %s", sid)
-			send = s.msgRouter[sid]
-		}
-
-		if avatar, err = s.db.AvatarBySessionID(sid); err != nil {
-			return s.HandleError(send, err)
-		}
-
-		log.Printf("verb %s from avatar %d in session %s", cmd.Verb, avatar.ID, sid)
-
-		if cmd.Verb == "quit" || cmd.Verb == "q" {
-			return nil
-		}
-
-		if affected, err = s.db.Earshot(*avatar); err != nil {
-			return s.HandleError(send, err)
-		}
-
-		for _, obj := range affected {
-			log.Printf("%s heard %s from %d", obj.Data["name"], cmd.Verb, avatar.ID)
-		}
-
-		for _, o = range affected {
-			if err = s.verbHandler(cmd.Verb, cmd.Rest, *avatar, o); err != nil {
-				log.Printf("error handling verb %s for object %d: %s", cmd.Verb, o.ID, err)
-			}
-		}
-
-		//s.HandleCmd(cmd.Verb, cmd.Rest, avatar)
-	}
-}
-
-func (s *gameWorldServer) Ping(ctx context.Context, _ *proto.SessionInfo) (*proto.Pong, error) {
-	pong := &proto.Pong{
-		When: "TODO",
-	}
-
-	return pong, nil
-}
-
-func (s *gameWorldServer) Messages(si *proto.SessionInfo, stream proto.GameWorld_MessagesServer) error {
-	s.msgRouterMutex.Lock()
-	s.msgRouter[si.SessionID] = stream.Send
-	s.msgRouterMutex.Unlock()
-
-	// TODO this is clearly bad but it works. I should refactor this so that
-	// messages are received on a channel.
-	for {
-	}
-}
-
-func (s *gameWorldServer) Register(ctx context.Context, auth *proto.AuthInfo) (si *proto.SessionInfo, err error) {
-	// TODO delete this
-	/*
-		var account *db.Account
-		account, err = s.db.CreateAccount(auth.Username, auth.Password)
-		if err != nil {
-			return
-		}
-
-		var sessionID string
-		sessionID, err = s.db.StartSession(*account)
-		if err != nil {
-			return nil, fmt.Errorf("failed to start session for %d: %w", account.ID, err)
-		}
-		log.Printf("started session for %s", account.Name)
-
-		av, err := s.db.AvatarBySessionID(sessionID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to find avatar for %s: %w", sessionID, err)
-		}
-
-		foyer, err := s.db.GetObject("system", "foyer")
-		if err != nil {
-			return nil, fmt.Errorf("failed to find foyer: %w", err)
-		}
-
-		if err = s.db.MoveInto(*av, *foyer); err != nil {
-			return nil, fmt.Errorf("failed to move %d into %d: %w", av.ID, foyer.ID, err)
-		}
-
-		// TODO send room info, avatar info to client (need to figure this out and update proto)
-
-		si = &proto.SessionInfo{SessionID: sessionID}
-	*/
-
-	return
-}
-
-func (s *gameWorldServer) Login(ctx context.Context, auth *proto.AuthInfo) (si *proto.SessionInfo, err error) {
+func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) error {
+	ctx := stream.Context()
 	p, ok := peer.FromContext(ctx)
 	if !ok {
-		// TODO
-		panic("did not get peer from context")
+		return errors.New("failed to get peer information from context")
 	}
 	pai, ok := p.AuthInfo.(PeerAuthInfo)
 	if !ok {
-		// TODO
-		panic("typecast failed")
+		return errors.New("failed to cast PeerAuthInfo")
 	}
-	fmt.Println(pai)
+	uid := pai.ucred.Uid
+	gid := pai.ucred.Gid
 
-	/*
-		var a *db.Account
-		a, err = s.db.ValidateCredentials(auth.Username, auth.Password)
-		if err != nil {
-			return
+	fmt.Println(uid, gid)
+
+	if _, ok := s.sessions[uid]; ok {
+		return fmt.Errorf("existing session for %d", uid)
+	}
+
+	u, err := user.LookupId(fmt.Sprintf("%d", uid))
+	if err != nil {
+		return fmt.Errorf("could not find user for uid %d: %w", uid, err)
+	}
+
+	avatar, err := s.db.GreateAvatar(*u)
+	if err != nil {
+		return fmt.Errorf("failed to get or create avatar for %d: %w", uid, err)
+	}
+
+	fmt.Println(avatar)
+
+	uio := &userIO{
+		inbound:  make(chan *proto.Command),
+		outbound: make(chan *proto.WorldEvent),
+		errs:     make(chan error),
+		done:     make(chan bool),
+	}
+
+	s.sessionMutex.Lock()
+	s.sessions[uid] = uio
+	s.sessionMutex.Unlock()
+
+	defer func() {
+		s.sessionMutex.Lock()
+		delete(s.sessions, uid)
+		s.sessionMutex.Unlock()
+		// TODO remove avatar from contains, send message to earshot; see EndSession
+	}()
+
+	go func() {
+		for {
+			if cmd, err := stream.Recv(); err != nil {
+				uio.errs <- err
+				uio.done <- true
+			} else {
+				uio.inbound <- cmd
+			}
 		}
+	}()
 
-		var sessionID string
-		sessionID, err = s.db.StartSession(*a)
-		if err != nil {
-			return
+	foyer, err := s.db.GetObject("system", "foyer")
+	if err != nil {
+		return fmt.Errorf("failed to find foyer: %w", err)
+	}
+
+	if err = s.db.MoveInto(*avatar, *foyer); err != nil {
+		return fmt.Errorf("failed to move %d into %d: %w", avatar.ID, foyer.ID, err)
+	}
+
+	for {
+		select {
+		case cmd := <-uio.inbound:
+			log.Printf("verb %s from uid %d", cmd.Verb, uid)
+			if cmd.Verb == "quit" || cmd.Verb == "q" {
+				// TODO book keeping
+			}
+			err := s.handleCmd(*avatar, cmd)
+			if err != nil {
+				uio.errs <- err
+			}
+		case ev := <-uio.outbound:
+			if err := stream.Send(ev); err != nil {
+				uio.errs <- err
+			}
+		case err := <-uio.errs:
+			log.Printf("error in stream for %d: %s", uid, err.Error())
+		case <-uio.done:
+			return nil
 		}
+	}
 
-		av, err := s.db.AvatarBySessionID(sessionID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to find avatar for %s: %w", sessionID, err)
-		}
-
-		foyer, err := s.db.GetObject("system", "foyer")
-		if err != nil {
-			return nil, fmt.Errorf("failed to find foyer: %w", err)
-		}
-
-		if err = s.db.MoveInto(*av, *foyer); err != nil {
-			return nil, fmt.Errorf("failed to move %d into %d: %w", av.ID, foyer.ID, err)
-		}
-
-		si = &proto.SessionInfo{SessionID: sessionID}
-	*/
-
-	return
 }
 
-func (s *gameWorldServer) HandleError(send func(*proto.ClientMessage) error, err error) error {
-	log.Printf("error: %s", err.Error())
-	msg := &proto.ClientMessage{
-		Type: proto.ClientMessage_WHISPER,
-		Text: "server error :(",
-	}
-	err = send(msg)
+func (s *gameWorldServer) handleCmd(avatar db.Object, cmd *proto.Command) error {
+	affected, err := s.db.Earshot(avatar)
 	if err != nil {
-		log.Printf("error sending to client: %s", err.Error())
+		return err
 	}
-	return err
+
+	for _, obj := range affected {
+		log.Printf("%s heard %s from %d", obj.Data["name"], cmd.Verb, avatar.ID)
+	}
+
+	for _, o := range affected {
+		if err = s.verbHandler(cmd.Verb, cmd.Rest, avatar, o); err != nil {
+			log.Printf("error handling verb %s for object %d: %s", cmd.Verb, o.ID, err)
+		}
+	}
+
+	return nil
+}
+
+func (s *gameWorldServer) Ping(ctx context.Context, _ *proto.PingMsg) (*proto.Pong, error) {
+	// TODO compute delta
+	pong := &proto.Pong{
+		Delta: "TODO",
+		When:  fmt.Sprintf("%d", time.Now().Unix()),
+	}
+
+	return pong, nil
 }

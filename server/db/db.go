@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"os/user"
 	"strings"
 
 	"github.com/google/uuid"
@@ -28,6 +29,8 @@ type DB interface {
 	EndSession(string) error
 	ActiveSessions() ([]Session, error)
 	ClearSessions() error
+
+	GreateAvatar(user.User) (*Object, error)
 
 	// General
 	GetObject(owner, name string) (*Object, error)
@@ -252,6 +255,85 @@ func (db *pgDB) CreateAccount(name, password string) (account *Account, err erro
 	}
 
 	return account, db.createAccount(account)
+}
+
+func (db *pgDB) GreateAvatar(u user.User) (av *Object, err error) {
+	ctx := context.Background()
+	tx, err := db.pool.Begin(ctx)
+	if err != nil {
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	av = &Object{}
+	stmt := `
+	SELECT id, avatar, data, owneruid, script FROM objects 
+	WHERE avatar = true AND owneruid = $1`
+	err = db.pool.QueryRow(context.Background(), stmt, u.Uid).Scan(
+		&av.ID, &av.Avatar, &av.Data, &av.OwnerID, &av.Script)
+	// TODO actually check error. for now assuming it means does not exist
+	if err == nil {
+		return
+	}
+
+	data := map[string]string{}
+	data["name"] = u.Username
+	data["description"] = fmt.Sprintf("a gaseous form. it smells faintly of %s.", randSmell())
+	av = &Object{
+		Avatar: true,
+		Data:   data,
+		Script: "",
+	}
+
+	av.Script = fmt.Sprintf(`%s
+hears(".*", function()
+	tellMe(msg)
+end)
+
+sees(".*", function()
+	showMe(msg)
+end)
+`, hasInvocation(av))
+
+	stmt = "INSERT INTO objects ( avatar, data, owneruid, script ) VALUES ( $1, $2, $3, $4 ) RETURNING id"
+	err = tx.QueryRow(ctx, stmt, av.Avatar, av.Data, u.Uid, av.Script).Scan(&av.ID)
+	if err != nil {
+		return
+	}
+
+	stmt = "INSERT INTO permissions (object) VALUES ( $1 )"
+	_, err = tx.Exec(ctx, stmt, av.ID)
+	if err != nil {
+		return
+	}
+
+	data = map[string]string{}
+	data["name"] = "your private bedroom"
+
+	bedroom := &Object{
+		Bedroom: true,
+		Data:    data,
+		Script:  "",
+	}
+
+	stmt = "INSERT INTO objects ( bedroom, data, owneruid, script ) VALUES ( $1, $2, $3, $4 ) RETURNING id"
+	err = tx.QueryRow(ctx, stmt, bedroom.Bedroom, bedroom.Data, u.Uid, bedroom.Script).Scan(&bedroom.ID)
+	if err != nil {
+		return
+	}
+
+	stmt = "INSERT INTO permissions (object) VALUES ( $1 )"
+	_, err = tx.Exec(ctx, stmt, bedroom.ID)
+	if err != nil {
+		return
+	}
+
+	err = tx.Commit(ctx)
+	if err != nil {
+		return
+	}
+
+	return
 }
 
 func (db *pgDB) createAccount(account *Account) (err error) {

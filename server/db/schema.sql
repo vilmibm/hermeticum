@@ -1,25 +1,12 @@
-CREATE TABLE accounts (
-	id       serial PRIMARY KEY,
-	name     varchar(100)  NOT NULL UNIQUE,
-	pwhash   varchar(100)  NOT NULL,
-	god      boolean       NOT NULL DEFAULT FALSE
-);
-
-CREATE TABLE sessions (
-  id varchar(100) PRIMARY KEY,
-  account integer REFERENCES accounts ON DELETE CASCADE
-);
-
 CREATE TYPE perm AS ENUM ('owner', 'world');
 
 CREATE TABLE objects (
   id        serial  PRIMARY KEY,
+  owneruid  int,
   avatar    boolean NOT NULL DEFAULT FALSE,
   bedroom   boolean NOT NULL DEFAULT FALSE,
   data      jsonb   NOT NULL,
-  script    text    NOT NULL,
-
-  owner   integer REFERENCES accounts ON DELETE RESTRICT
+  script    text    NOT NULL
 );
 
 -- owner = 1, world = 2
