@@ -255,7 +255,29 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 		delete(s.sessions, uid)
 		s.sessionMutex.Unlock()
 		s.db.Derez(uid)
-		// TODO send message to earshot about departure
+		affected, err := s.db.Earshot(*avatar)
+		if err != nil {
+			log.Printf("error trying to inform others about a derez: %s", err.Error())
+			return
+		}
+
+		for _, obj := range affected {
+			if obj.Avatar {
+				aio, ok := s.sessions[uint32(obj.OwnerID)]
+				if ok {
+					aname, ok := avatar.Data["name"]
+					if !ok {
+						aname = "amorphous entity"
+					}
+					msg := "slowly fades out of existence"
+					aio.outbound <- &proto.WorldEvent{
+						Type:   proto.WorldEvent_EMOTE,
+						Source: &aname,
+						Text:   &msg,
+					}
+				}
+			}
+		}
 	}()
 
 	go func() {
