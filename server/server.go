@@ -248,6 +248,7 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 	s.sessionMutex.Unlock()
 
 	defer func() {
+		log.Printf("ending session for %d", uid)
 		s.sessionMutex.Lock()
 		delete(s.sessions, uid)
 		s.sessionMutex.Unlock()
@@ -280,11 +281,12 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 		case cmd := <-uio.inbound:
 			log.Printf("verb %s from uid %d", cmd.Verb, uid)
 			if cmd.Verb == "quit" || cmd.Verb == "q" {
-				// TODO book keeping
-			}
-			err := s.handleCmd(*avatar, cmd)
-			if err != nil {
-				uio.errs <- err
+				uio.done <- true
+			} else {
+				err := s.handleCmd(*avatar, cmd)
+				if err != nil {
+					uio.errs <- err
+				}
 			}
 		case ev := <-uio.outbound:
 			if err := stream.Send(ev); err != nil {
@@ -293,10 +295,10 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 		case err := <-uio.errs:
 			log.Printf("error in stream for %d: %s", uid, err.Error())
 		case <-uio.done:
+			log.Println("GOT A DONE")
 			return nil
 		}
 	}
-
 }
 
 func (s *gameWorldServer) handleCmd(avatar db.Object, cmd *proto.Command) error {

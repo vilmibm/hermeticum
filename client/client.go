@@ -1,15 +1,14 @@
 package client
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"log"
 	"os"
-	"os/signal"
 	"strings"
 	"time"
 
-	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/vilmibm/hermeticum/proto"
 	"google.golang.org/grpc"
@@ -20,7 +19,7 @@ type ConnectOpts struct {
 }
 
 type ClientState struct {
-	App          *tview.Application
+	//App          *tview.Application
 	Client       proto.GameWorldClient
 	MaxMessages  int
 	messagesView *tview.TextView
@@ -28,14 +27,15 @@ type ClientState struct {
 	cio          *clientIO
 }
 
-func (cs *ClientState) HandleSIGINT(sigC chan os.Signal) {
-	for range sigC {
-		cmd := &proto.Command{
-			Verb: "quit",
-		}
-		cs.cio.outbound <- cmd
-	}
-}
+// TODO this was leading to weird behavior
+//func (cs *ClientState) HandleSIGINT(sigC chan os.Signal) {
+//	for range sigC {
+//		cmd := &proto.Command{
+//			Verb: "quit",
+//		}
+//		cs.cio.outbound <- cmd
+//	}
+//}
 
 func (cs *ClientState) HandleInput(input string) {
 	var verb string
@@ -59,19 +59,32 @@ func (cs *ClientState) AddMessage(ev *proto.WorldEvent) {
 		cs.events = cs.events[1 : len(cs.events)-1]
 	}
 
-	// TODO look into using the SetChangedFunc thing.
-	cs.App.QueueUpdateDraw(func() {
-		// TODO trim content of messagesView /or/ see if tview has a buffer size that does it for me. use cs.messages to re-constitute.
+	/*
+		// TODO look into using the SetChangedFunc thing.
+		cs.App.QueueUpdateDraw(func() {
+			// TODO trim content of messagesView /or/ see if tview has a buffer size that does it for me. use cs.messages to re-constitute.
+			switch ev.Type {
+			case proto.WorldEvent_OVERHEARD:
+				fmt.Fprintf(cs.messagesView, "%s: %s\n", ev.GetSource(), ev.GetText())
+			case proto.WorldEvent_EMOTE:
+				fmt.Fprintf(cs.messagesView, "%s %s\n", ev.GetSource(), ev.GetText())
+			default:
+				fmt.Fprintf(cs.messagesView, "%#v\n", ev)
+			}
+			cs.messagesView.ScrollToEnd()
+		})
+	*/
+	for _, ev := range cs.events {
+		fmt.Print("\x1b[1B")
 		switch ev.Type {
 		case proto.WorldEvent_OVERHEARD:
-			fmt.Fprintf(cs.messagesView, "%s: %s\n", ev.GetSource(), ev.GetText())
+			fmt.Printf("%s: %s\n", ev.GetSource(), ev.GetText())
 		case proto.WorldEvent_EMOTE:
-			fmt.Fprintf(cs.messagesView, "%s %s\n", ev.GetSource(), ev.GetText())
+			fmt.Printf("%s %s\n", ev.GetSource(), ev.GetText())
 		default:
-			fmt.Fprintf(cs.messagesView, "%#v\n", ev)
+			fmt.Printf("%#v\n", ev)
 		}
-		cs.messagesView.ScrollToEnd()
-	})
+	}
 }
 
 type clientIO struct {
@@ -89,26 +102,24 @@ func Connect(opts ConnectOpts) error {
 		return err
 	}
 	client := proto.NewGameWorldClient(gc)
-	app := tview.NewApplication()
-
-	// TODO make a NewClientState
-	// TODO rename this, like, UI
-	cs := &ClientState{
-		App:         app,
-		Client:      client,
-		MaxMessages: 15, // TODO for testing
-		events:      []*proto.WorldEvent{},
-	}
+	//app := tview.NewApplication()
 
 	cio := &clientIO{
 		inbound:  make(chan *proto.WorldEvent),
 		outbound: make(chan *proto.Command),
 		errs:     make(chan error),
-		done:     make(chan bool),
+		done:     make(chan bool, 1),
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	// TODO make a NewClientState
+	// TODO rename this, like, UI
+	cs := &ClientState{
+		//App:         app,
+		Client:      client,
+		MaxMessages: 15, // TODO for testing
+		events:      []*proto.WorldEvent{},
+		cio:         cio,
+	}
 
 	now := fmt.Sprintf("%d", time.Now().Unix())
 
@@ -116,44 +127,48 @@ func Connect(opts ConnectOpts) error {
 		log.Fatalf("%v.Ping -> %v", cs.Client, err)
 	}
 
-	commandInput := tview.NewInputField().SetLabel("> ")
-	handleInput := func(_ tcell.Key) {
-		input := commandInput.GetText()
-		// TODO command history
-		commandInput.SetText("")
-		// TODO do i need to clear the input's text?
-		cs.HandleInput(input)
-	}
+	/*
+		commandInput := tview.NewInputField().SetLabel("> ")
+		handleInput := func(_ tcell.Key) {
+			input := commandInput.GetText()
+			// TODO command history
+			commandInput.SetText("")
+			// TODO do i need to clear the input's text?
+			cs.HandleInput(input)
+		}
 
-	commandInput.SetDoneFunc(handleInput)
+		commandInput.SetDoneFunc(handleInput)
 
-	sigC := make(chan os.Signal, 1)
-	signal.Notify(sigC, os.Interrupt)
+		sigC := make(chan os.Signal, 1)
+		signal.Notify(sigC, os.Interrupt)
 
-	msgView := tview.NewTextView().SetScrollable(true).SetWrap(true).SetWordWrap(true)
-	cs.messagesView = msgView
-	gamePage := tview.NewGrid().
-		SetRows(1, 40, 3).
-		SetColumns(-1, -1).
-		SetBorders(true).
-		AddItem(
-			tview.NewTextView().SetTextAlign(tview.AlignLeft).SetText("h e r m e t i c u m"),
-			0, 0, 1, 1, 1, 1, false).
-		AddItem(
-			tview.NewTextView().SetTextAlign(tview.AlignRight).SetText("TODO server status"),
-			0, 1, 1, 1, 1, 1, false).
-		AddItem(
-			msgView,
-			1, 0, 1, 1, 10, 20, false).
-		AddItem(
-			tview.NewTextView().SetText("TODO details"),
-			1, 1, 1, 1, 10, 10, false).
-		AddItem(
-			commandInput,
-			2, 0, 1, 2, 1, 30, false)
+		msgView := tview.NewTextView().SetScrollable(true).SetWrap(true).SetWordWrap(true)
+		cs.messagesView = msgView
+		gamePage := tview.NewGrid().
+			SetRows(1, 40, 3).
+			SetColumns(-1, -1).
+			SetBorders(true).
+			AddItem(
+				tview.NewTextView().SetTextAlign(tview.AlignLeft).SetText("h e r m e t i c u m"),
+				0, 0, 1, 1, 1, 1, false).
+			AddItem(
+				tview.NewTextView().SetTextAlign(tview.AlignRight).SetText("TODO server status"),
+				0, 1, 1, 1, 1, 1, false).
+			AddItem(
+				msgView,
+				1, 0, 1, 1, 10, 20, false).
+			AddItem(
+				tview.NewTextView().SetText("TODO details"),
+				1, 1, 1, 1, 10, 10, false).
+			AddItem(
+				commandInput,
+				2, 0, 1, 2, 1, 30, false)
 
-	pages := tview.NewPages()
-	pages.AddPage("game", gamePage, true, true)
+		pages := tview.NewPages()
+		pages.AddPage("game", gamePage, true, true)
+
+	*/
+	ctx := context.Background()
 
 	stream, err := cs.Client.ClientInput(ctx)
 	if err != nil {
@@ -171,11 +186,28 @@ func Connect(opts ConnectOpts) error {
 		}
 	}()
 
+	/*
+		go func() {
+			err := app.SetRoot(pages, true).SetFocus(commandInput).Run()
+			if err != nil {
+				cio.errs <- err
+				cio.done <- true
+			}
+		}()
+	*/
+
 	go func() {
-		err := app.SetRoot(pages, true).SetFocus(commandInput).Run()
-		if err != nil {
-			cio.errs <- err
-			cio.done <- true
+		for {
+			var s string
+			r := bufio.NewReader(os.Stdin)
+			for {
+				fmt.Fprint(os.Stdout, "\x1b[H> ")
+				s, _ = r.ReadString('\n')
+				if s != "" {
+					break
+				}
+			}
+			cs.HandleInput(strings.TrimSpace(s))
 		}
 	}()
 
@@ -193,7 +225,8 @@ func Connect(opts ConnectOpts) error {
 		case err := <-cio.errs:
 			log.Printf("error: %s", err.Error())
 		case <-cio.done:
-			cs.App.Stop()
+			fmt.Println("DONE")
+			//cs.App.Stop()
 			return nil
 		}
 	}
