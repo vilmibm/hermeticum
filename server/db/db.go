@@ -417,7 +417,7 @@ func (db *DB) Resolve(vantage Object, term string) ([]Object, error) {
 }
 
 func (db *DB) GhostBust() error {
-	stmt := "DELETE FROM contains WHERE contained = (SELECT id FROM objects WHERE objects.avatar)"
+	stmt := "DELETE FROM contains WHERE contained IN (SELECT id FROM objects WHERE objects.avatar)"
 	if _, err := db.pool.Exec(context.Background(), stmt); err != nil {
 		return fmt.Errorf("failed to bust ghosts: %w", err)
 	}
