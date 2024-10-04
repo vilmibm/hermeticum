@@ -230,8 +230,8 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 	uio := &userIO{
 		inbound:  make(chan *proto.Command),
 		outbound: make(chan *proto.WorldEvent),
-		errs:     make(chan error),
-		done:     make(chan bool),
+		errs:     make(chan error, 1),
+		done:     make(chan bool, 1),
 	}
 
 	rootu, err := user.Lookup("root")
