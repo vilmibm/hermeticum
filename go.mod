@@ -31,7 +31,4 @@ require (
 	google.golang.org/genproto v0.0.0-20200526211855-cb27e3aa2013 // indirect
 )
 
-require (
-	github.com/google/uuid v1.6.0
-	github.com/yuin/gopher-lua v0.0.0-20221210110428-332342483e3f
-)
+require github.com/yuin/gopher-lua v0.0.0-20221210110428-332342483e3f
