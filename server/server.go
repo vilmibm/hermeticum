@@ -151,13 +151,22 @@ func (s *gameWorldServer) verbHandler(verb, rest string, sender, target db.Objec
 	s.scriptsMutex.RUnlock()
 	var err error
 
-	// TODO
-	getSend := func(sid string) func(*proto.ClientMessage) error {
-		return s.msgRouter[sid]
+	/*
+		I am at a loss why I did this getSend thing. I feel like I arrived at it after some amount of trial/error/debugging/frustration.
+
+		Ideally script contexts just have a clientSend function that accepts a WorldEvent. I will just start switching to that and see what goes wrong.
+	*/
+
+	clientSend := func(uid uint32, ev *proto.WorldEvent) {
+		if uio, ok := s.sessions[uid]; ok {
+			uio.outbound <- ev
+		} else {
+			// TODO log this
+		}
 	}
 
 	if !ok || sc == nil {
-		if sc, err = witch.NewScriptContext(s.db, getSend); err != nil {
+		if sc, err = witch.NewScriptContext(s.db, clientSend); err != nil {
 			return err
 		}
 

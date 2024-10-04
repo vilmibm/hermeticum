@@ -32,19 +32,21 @@ end)
 */
 
 type serverAPI struct {
-	db      db.DB
-	getSend func(string) func(*proto.ClientMessage) error
+	db         db.DB
+	clientSend func(uint32, *proto.WorldEvent)
 }
 
 func (s *serverAPI) Tell(fromObjID, toObjID int, msg string) {
 	log.Printf("Tell: %d %d %s", fromObjID, toObjID, msg)
-	sid, err := s.db.SessionIDForObjID(toObjID)
+
+	to, err := s.db.GetObjectByID(toObjID)
 	if err != nil {
 		log.Println(err)
 		return
 	}
 
-	if sid == "" {
+	if !to.Avatar {
+		log.Printf("tried to Tell a non avatar: from %d to %d '%s'", fromObjID, toObjID, msg)
 		return
 	}
 
@@ -59,21 +61,24 @@ func (s *serverAPI) Tell(fromObjID, toObjID int, msg string) {
 		speakerName = from.Data["name"]
 	}
 
-	log.Println(sid)
-
-	send := s.getSend(sid)
-	cm := proto.ClientMessage{
-		Type:    proto.ClientMessage_OVERHEARD,
-		Text:    msg,
-		Speaker: &speakerName,
+	ev := proto.WorldEvent{
+		Type:   proto.WorldEvent_OVERHEARD,
+		Text:   &msg,
+		Source: &speakerName,
 	}
-	send(&cm)
+	s.clientSend(uint32(to.OwnerID), &ev)
 }
 
 func (s *serverAPI) Show(fromObjID, toObjID int, action string) {
-	sid, err := s.db.SessionIDForObjID(toObjID)
+	to, err := s.db.GetObjectByID(toObjID)
 	if err != nil {
-		log.Println(err.Error())
+		log.Println(err)
+		return
+	}
+
+	if !to.Avatar {
+		log.Printf("tried to Tell a non avatar: from %d to %d '%s'",
+			fromObjID, toObjID, action)
 		return
 	}
 
@@ -88,15 +93,12 @@ func (s *serverAPI) Show(fromObjID, toObjID int, action string) {
 		speakerName = from.Data["name"]
 	}
 
-	log.Println(sid)
-
-	send := s.getSend(sid)
-	cm := proto.ClientMessage{
-		Type:    proto.ClientMessage_EMOTE,
-		Text:    action,
-		Speaker: &speakerName,
+	ev := proto.WorldEvent{
+		Type:   proto.WorldEvent_EMOTE,
+		Text:   &action,
+		Source: &speakerName,
 	}
-	send(&cm)
+	s.clientSend(uint32(to.OwnerID), &ev)
 }
 
 func (s *serverAPI) DB() db.DB {
@@ -111,16 +113,16 @@ type VerbContext struct {
 }
 
 type ScriptContext struct {
-	db        db.DB
-	getSend   func(*proto.ClientMessage) error
-	script    string
-	incoming  chan VerbContext
-	serverAPI serverAPI
+	db         db.DB
+	clientSend func(uint32, *proto.WorldEvent)
+	script     string
+	incoming   chan VerbContext
+	serverAPI  serverAPI
 }
 
-func NewScriptContext(db db.DB, getSend func(string) func(*proto.ClientMessage) error) (*ScriptContext, error) {
+func NewScriptContext(db db.DB, clientSend func(uint32, *proto.WorldEvent)) (*ScriptContext, error) {
 	sc := &ScriptContext{
-		serverAPI: serverAPI{db: db, getSend: getSend},
+		serverAPI: serverAPI{db: db, clientSend: clientSend},
 		db:        db,
 	}
 	sc.incoming = make(chan VerbContext)
