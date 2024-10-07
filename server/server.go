@@ -172,7 +172,11 @@ func newServer() (*gameWorldServer, error) {
 func (s *gameWorldServer) verbHandler(verb, rest string, sender, target db.Object) error {
 	log.Printf("VH %s %s %d %d", verb, rest, sender.ID, target.ID)
 
-	// TODO check execute permission
+	// TODO check lock
+
+	if target.Perms.Exec == db.PermOwner && sender.ID != target.OwnerID {
+		return nil
+	}
 
 	s.scriptsMutex.RLock()
 	sc, ok := s.scripts[target.ID]

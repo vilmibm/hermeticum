@@ -139,7 +139,6 @@ allows({
 	carry = "%s",
 	execute = "%s",
 })`, o.Perms.Read, o.Perms.Write, o.Perms.Carry, o.Perms.Exec)
-
 }
 
 func (o *Object) Save(db *DB) error {
@@ -153,9 +152,7 @@ func (o *Object) Save(db *DB) error {
 	stmt := `
 		INSERT INTO objects (avatar, bedroom, data, script, owneruid)
 		VALUES ( $1, $2, $3, $4, $5)
-		RETURNING id
-	`
-
+		RETURNING id`
 	err = db.pool.QueryRow(ctx, stmt,
 		o.Avatar, o.Bedroom, o.Data, o.script, o.OwnerID).Scan(
 		&o.ID)
@@ -163,7 +160,8 @@ func (o *Object) Save(db *DB) error {
 		return err
 	}
 
-	stmt = "INSERT INTO permissions (object, read, write, carry, exec) VALUES ($1, $2, $3, $4, $5)"
+	stmt = `INSERT INTO permissions (object, read, write, carry, exec)
+					VALUES ($1, $2, $3, $4, $5)`
 	if _, err = tx.Exec(ctx, stmt, o.ID,
 		o.Perms.Read, o.Perms.Write, o.Perms.Carry, o.Perms.Exec); err != nil {
 		return err
