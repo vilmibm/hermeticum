@@ -17,15 +17,6 @@ import (
 //go:embed schema.sql
 var schema string
 
-type Object struct {
-	ID      int
-	Avatar  bool
-	Bedroom bool
-	Data    map[string]string
-	OwnerID int
-	Script  string
-}
-
 type DB struct {
 	pool *pgxpool.Pool
 }
@@ -108,183 +99,87 @@ func (db *DB) Ensure() error {
 
 	rootuid := uint32(uid)
 
-	// TODO for some reason, when the seen() callback runs for foyer we're calling the stub Tell instead of the sid-closured Tell. figure out why.
-
-	seenScript := `
-		seen(function()
-			tellSender(my("description"))
-		end)
-	`
-
-	foyer, err := db.GetObject(rootuid, "foyer")
+	foyer, err := ObjectByOwnerName(db, rootuid, "foyer")
 	if err != nil {
 		// TODO actually check error. for now assuming it means does not exist
-		data := map[string]string{}
-		data["name"] = "foyer"
-		data["description"] = "a big room. the ceiling is painted with constellations."
-		foyer = &Object{
-			Data:   data,
-			Script: seenScript,
-		}
-		if err = db.CreateObject(rootuid, foyer); err != nil {
+		foyer = NewRoom(rootuid)
+		foyer.SetData("name", "foyer")
+		foyer.SetData("description", "a big room. the ceiling is painted with constellations.")
+		if err = foyer.Save(db); err != nil {
 			return err
 		}
 	}
 
-	egg, err := db.GetObject(rootuid, "floor egg")
+	egg, err := ObjectByOwnerName(db, rootuid, "floor egg")
 	if err != nil {
 		// TODO actually check error. for now assuming it means does not exist
-		data := map[string]string{}
-		data["name"] = "floor egg"
-		data["description"] = "it's an egg and it's on the floor."
-		egg = &Object{
-			Data:   data,
-			Script: seenScript,
-		}
-		if err = db.CreateObject(rootuid, egg); err != nil {
+		egg = NewObject(rootuid)
+		egg.SetData("name", "floor egg")
+		egg.SetData("description", "it's an egg and it's on the floor")
+		egg.Perms.Carry = PermOwner
+		if err = egg.Save(db); err != nil {
 			return err
 		}
 	}
 
-	pub, err := db.GetObject(rootuid, "pub")
+	pub, err := ObjectByOwnerName(db, rootuid, "pub")
 	if err != nil {
 		// TODO actually check error. for now assuming it means does not exist
-		data := map[string]string{}
-		data["name"] = "pub"
-		data["description"] = "a warm pub constructed of hard wood and brass"
-		pub = &Object{
-			Data:   data,
-			Script: seenScript,
-		}
-		if err = db.CreateObject(rootuid, pub); err != nil {
+		pub = NewRoom(rootuid)
+		pub.SetData("name", "pub")
+		pub.SetData("description", "a warm, cozy pub constructed of hard wood and brass")
+		if err = pub.Save(db); err != nil {
 			return err
 		}
 	}
 
-	oakDoor, err := db.GetObject(rootuid, "oak door")
+	oakDoor, err := ObjectByOwnerName(db, rootuid, "oak door")
 	if err != nil {
 		// TODO actually check error. for now assuming it means does not exist
-		data := map[string]string{}
-		data["name"] = "oak door"
-		data["description"] = "a heavy oak door with a brass handle. an ornate sign says PUB."
-		oakDoor = &Object{
-			Data: data,
-			Script: seenScript + fmt.Sprintf(`
-				provides("get tetanus", function(args)
-					tellSender("you now have tetanus")
-				end)
-
-				goes(north, %d)
-			`, pub.ID),
-		}
-		if err = db.CreateObject(rootuid, oakDoor); err != nil {
+		oakDoor = NewObject(rootuid)
+		oakDoor.SetData("name", "oak door")
+		oakDoor.SetData("description", "a heavy oak door with a brass handle. an ornate sign says PUB.")
+		oakDoor.AppendScript(fmt.Sprintf("goes(north, %d)", pub.ID))
+		oakDoor.Perms.Carry = PermOwner
+		if err = oakDoor.Save(db); err != nil {
 			return err
 		}
 	}
 
-	oakDoorReverse, err := db.GetObject(rootuid, "exit oak door")
+	revOakDoor, err := ObjectByOwnerName(db, rootuid, "oak door out")
 	if err != nil {
 		// TODO actually check error. for now assuming it means does not exist
-		data := map[string]string{}
-		data["name"] = "exit oak door"
-		data["description"] = "a heavy oak door with a brass handle. an ornate sign says EXIT."
-		oakDoor = &Object{
-			Data: data,
-			Script: seenScript + fmt.Sprintf(`
-				goes(south, %d)
-			`, foyer.ID),
-		}
-		if err = db.CreateObject(rootuid, oakDoor); err != nil {
+		revOakDoor = NewObject(rootuid)
+		revOakDoor.SetData("name", "oak door out")
+		revOakDoor.SetData("description", "a heavy oak door with a brass handle. an ornate sign says EXIT.")
+		revOakDoor.AppendScript(fmt.Sprintf("goes(south, %d)", foyer.ID))
+		revOakDoor.Perms.Carry = PermOwner
+		if err = revOakDoor.Save(db); err != nil {
 			return err
 		}
 	}
 
-	sysAva, err := db.GreateAvatar(rootuid, "root")
-	if err != nil {
-		return fmt.Errorf("could not find or create avatar for system account: %w", err)
-	}
-
-	db.MoveInto(*sysAva, *foyer)
 	db.MoveInto(*egg, *foyer)
 	db.MoveInto(*oakDoor, *foyer)
-	db.MoveInto(*oakDoorReverse, *pub)
+	db.MoveInto(*revOakDoor, *pub)
 
 	return nil
 }
 
 func (db *DB) GreateAvatar(uid uint32, name string) (av *Object, err error) {
-	ctx := context.Background()
-	tx, err := db.pool.Begin(ctx)
-	if err != nil {
-		return
-	}
-	defer tx.Rollback(ctx)
-
 	av, err = db.GetAvatarForUid(uid)
 	// TODO actually check error. for now assuming it means does not exist
 	if err == nil {
 		return
 	}
 
-	data := map[string]string{}
-	data["name"] = name
-	data["description"] = fmt.Sprintf("a gaseous form. it smells faintly of %s.", randSmell())
-	av = &Object{
-		Avatar:  true,
-		Data:    data,
-		Script:  "",
-		OwnerID: int(uid),
-	}
-
-	av.Script = fmt.Sprintf(`%s
-hears(".*", function()
-	tellMe(msg)
-end)
-
-sees(".*", function()
-	showMe(msg)
-end)
-
-seen(function()
-	tellSender(my("description"))
-end)
-`, hasInvocation(av))
-
-	stmt := "INSERT INTO objects ( avatar, data, owneruid, script ) VALUES ( $1, $2, $3, $4 ) RETURNING id"
-	err = tx.QueryRow(ctx, stmt, av.Avatar, av.Data, uid, av.Script).Scan(&av.ID)
-	if err != nil {
+	av = NewAvatar(uid, name)
+	if err = av.Save(db); err != nil {
 		return
 	}
 
-	stmt = "INSERT INTO permissions (object) VALUES ( $1 )"
-	_, err = tx.Exec(ctx, stmt, av.ID)
-	if err != nil {
-		return
-	}
-
-	data = map[string]string{}
-	data["name"] = "your private bedroom"
-
-	bedroom := &Object{
-		Bedroom: true,
-		Data:    data,
-		Script:  "",
-	}
-
-	stmt = "INSERT INTO objects ( bedroom, data, owneruid, script ) VALUES ( $1, $2, $3, $4 ) RETURNING id"
-	err = tx.QueryRow(ctx, stmt, bedroom.Bedroom, bedroom.Data, uid, bedroom.Script).Scan(&bedroom.ID)
-	if err != nil {
-		return
-	}
-
-	stmt = "INSERT INTO permissions (object) VALUES ( $1 )"
-	_, err = tx.Exec(ctx, stmt, bedroom.ID)
-	if err != nil {
-		return
-	}
-
-	err = tx.Commit(ctx)
-	if err != nil {
+	br := NewBedroom(uid, name)
+	if err = br.Save(db); err != nil {
 		return
 	}
 
@@ -298,7 +193,7 @@ func (db *DB) ContainerFor(o Object) (oo *Object, err error) {
 		WHERE id IN (SELECT container FROM contains WHERE contained = $1)
 	`
 	err = db.pool.QueryRow(context.Background(), stmt, o.ID).Scan(
-		&oo.ID, &oo.Avatar, &oo.Data, &oo.OwnerID, &oo.Script)
+		&oo.ID, &oo.Avatar, &oo.Data, &oo.OwnerID, &oo.script)
 	return
 }
 
@@ -308,7 +203,7 @@ func (db *DB) GetAvatarForUid(uid uint32) (av *Object, err error) {
 	SELECT id, avatar, data, owneruid, script FROM objects 
 	WHERE avatar = true AND owneruid = $1`
 	err = db.pool.QueryRow(context.Background(), stmt, uid).Scan(
-		&av.ID, &av.Avatar, &av.Data, &av.OwnerID, &av.Script)
+		&av.ID, &av.Avatar, &av.Data, &av.OwnerID, &av.script)
 	return
 }
 
@@ -369,7 +264,7 @@ func (db *DB) Earshot(obj Object) ([]Object, error) {
 		if err = rows.Scan(
 			&heard.ID, &heard.Avatar,
 			&heard.Bedroom, &heard.Data,
-			&heard.OwnerID, &heard.Script); err != nil {
+			&heard.OwnerID, &heard.script); err != nil {
 			return nil, err
 		}
 		out = append(out, heard)
@@ -386,7 +281,7 @@ func (db *DB) GetObjectByID(ID int) (*Object, error) {
 		FROM objects
 		WHERE id = $1`
 	err := db.pool.QueryRow(ctx, stmt, ID).Scan(
-		&obj.ID, &obj.Avatar, &obj.Data, &obj.OwnerID, &obj.Script)
+		&obj.ID, &obj.Avatar, &obj.Data, &obj.OwnerID, &obj.script)
 	return obj, err
 }
 
@@ -398,7 +293,7 @@ func (db *DB) GetObject(owneruid uint32, name string) (obj *Object, err error) {
 		FROM objects
 		WHERE owneruid = $1 AND data['name'] = $2`
 	err = db.pool.QueryRow(ctx, stmt, owneruid, fmt.Sprintf(`"%s"`, name)).Scan(
-		&obj.ID, &obj.Avatar, &obj.Data, &obj.OwnerID, &obj.Script)
+		&obj.ID, &obj.Avatar, &obj.Data, &obj.OwnerID, &obj.script)
 
 	return
 }
@@ -425,7 +320,7 @@ func (db *DB) SearchObjectsByName(term string) ([]Object, error) {
 			&o.Avatar,
 			&o.Data,
 			&o.OwnerID,
-			&o.Script); err != nil {
+			&o.script); err != nil {
 			return nil, err
 		}
 		out = append(out, o)
@@ -467,26 +362,6 @@ func hasInvocation(obj *Object) string {
 	hi += "})"
 
 	return hi
-}
-
-func (db *DB) CreateObject(owneruid uint32, obj *Object) error {
-	ctx := context.Background()
-	stmt := `
-		INSERT INTO objects (avatar, bedroom, data, script, owneruid)
-		VALUES ( $1, $2, $3, $4, $5)
-		RETURNING id
-	`
-
-	obj.Script = hasInvocation(obj) + obj.Script
-
-	err := db.pool.QueryRow(ctx, stmt,
-		obj.Avatar, obj.Bedroom, obj.Data, obj.Script, owneruid).Scan(
-		&obj.ID)
-	if err != nil {
-		return err
-	}
-
-	return nil
 }
 
 func randSmell() string {

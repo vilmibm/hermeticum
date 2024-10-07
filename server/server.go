@@ -172,16 +172,12 @@ func newServer() (*gameWorldServer, error) {
 func (s *gameWorldServer) verbHandler(verb, rest string, sender, target db.Object) error {
 	log.Printf("VH %s %s %d %d", verb, rest, sender.ID, target.ID)
 
+	// TODO check execute permission
+
 	s.scriptsMutex.RLock()
 	sc, ok := s.scripts[target.ID]
 	s.scriptsMutex.RUnlock()
 	var err error
-
-	/*
-		I am at a loss why I did this getSend thing. I feel like I arrived at it after some amount of trial/error/debugging/frustration.
-
-		Ideally script contexts just have a clientSend function that accepts a WorldEvent. I will just start switching to that and see what goes wrong.
-	*/
 
 	clientSend := func(uid uint32, ev *proto.WorldEvent) {
 		if uio, ok := s.sessions[uid]; ok {
@@ -370,26 +366,13 @@ func (s *gameWorldServer) handleDig(avatar db.Object, cmd *proto.Command) error 
 	}
 	dir := witch.NormalizeDirection(heading)
 
-	currentRoom, err := s.db.ContainerFor(avatar)
+	currentRoom, err := avatar.Container(s.db)
 	if err != nil {
 		return err
 	}
 
-	seenScript := `
-			seen(function()
-				tellSender(my("description"))
-			end)`
-
-	room := db.Object{
-		Data: map[string]string{
-			"name":        "construction site",
-			"description": "a pit of moist dirt and rubble. surely it will become something",
-		},
-		Script: seenScript,
-	}
-
-	err = s.db.CreateObject(uid, &room)
-	if err != nil {
+	room := db.NewRoom(uid)
+	if err = room.Save(s.db); err != nil {
 		return err
 	}
 
@@ -401,42 +384,30 @@ func (s *gameWorldServer) handleDig(avatar db.Object, cmd *proto.Command) error 
 		name = "ladder"
 	}
 
-	door := db.Object{
-		Data: map[string]string{
-			"name":        name,
-			"description": desc,
-		},
-		Script: fmt.Sprintf(seenScript+`
-			goes(%s, %d)
-		`, heading, room.ID),
+	door := db.NewObject(uid)
+	door.SetData("name", name)
+	door.SetData("description", desc)
+	door.AppendScript(fmt.Sprintf("goes(%s, %d)", heading, room.ID))
+	if err = door.Save(s.db); err != nil {
+		return err
 	}
 
-	err = s.db.CreateObject(uid, &door)
+	revDoor := db.NewObject(uid)
+	revDoor.SetData("name", name)
+	revDoor.SetData("description", desc)
+	revDoor.AppendScript(fmt.Sprintf("goes(%s, %d)",
+		dir.Reverse().Human(), currentRoom.ID))
+
+	if err = revDoor.Save(s.db); err != nil {
+		return err
+	}
+
+	err = s.db.MoveInto(*door, *currentRoom)
 	if err != nil {
 		return err
 	}
 
-	revDoor := db.Object{
-		Data: map[string]string{
-			"name":        name,
-			"description": desc,
-		},
-		Script: fmt.Sprintf(seenScript+`
-			goes(%s, %d)
-		`, dir.Reverse().Human(), currentRoom.ID),
-	}
-
-	err = s.db.CreateObject(uid, &revDoor)
-	if err != nil {
-		return err
-	}
-
-	err = s.db.MoveInto(door, *currentRoom)
-	if err != nil {
-		return err
-	}
-
-	err = s.db.MoveInto(revDoor, room)
+	err = s.db.MoveInto(*revDoor, *room)
 	if err != nil {
 		return err
 	}

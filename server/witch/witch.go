@@ -133,8 +133,8 @@ func NewScriptContext(db *db.DB, clientSend func(uint32, *proto.WorldEvent)) (*S
 		var vc VerbContext
 		for {
 			vc = <-sc.incoming
-			if vc.Target.Script != sc.script {
-				sc.script = vc.Target.Script
+			if vc.Target.GetScript() != sc.script {
+				sc.script = vc.Target.GetScript()
 				l = lua.NewState()
 
 				// direction constants
@@ -148,6 +148,7 @@ func NewScriptContext(db *db.DB, clientSend func(uint32, *proto.WorldEvent)) (*S
 				l.SetGlobal("down", lua.LString(dirBelow))
 
 				// witch object behavior functions
+				l.SetGlobal("allows", l.NewFunction(sc.wAllows))
 				l.SetGlobal("has", l.NewFunction(sc.wHas))
 				l.SetGlobal("hears", l.NewFunction(sc.wHears))
 				l.SetGlobal("sees", l.NewFunction(sc.wSees))
@@ -160,8 +161,8 @@ func NewScriptContext(db *db.DB, clientSend func(uint32, *proto.WorldEvent)) (*S
 				l.SetGlobal("_handlers", l.NewTable())
 				l.SetGlobal("_ID", lua.LNumber(vc.Target.ID))
 
-				if err := l.DoString(vc.Target.Script); err != nil {
-					log.Printf("error parsing script %s: %s", vc.Target.Script, err.Error())
+				if err := l.DoString(vc.Target.GetScript()); err != nil {
+					log.Printf("error parsing script %s: %s", vc.Target.GetScript(), err.Error())
 				}
 			}
 
@@ -284,8 +285,15 @@ func (sc *ScriptContext) wMy(l *lua.LState) int {
 	return 1
 }
 
+func (sc *ScriptContext) wAllows(l *lua.LState) int {
+	l.SetGlobal("_allows", l.ToTable(1))
+	// TODO
+	return 0
+}
+
 func (sc *ScriptContext) wHas(l *lua.LState) int {
 	l.SetGlobal("_has", l.ToTable(1))
+	// TODO
 	return 0
 }
 

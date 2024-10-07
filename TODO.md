@@ -10,5 +10,9 @@ blowing off the dust
   - [X] pseudocode the handling of new Commands
   - [X] try to think of a better name than Commands...
   - [X] implement the pseudo code
-- [ ] understand why i did `getSend`
-- [ ] fix script contexts' ability to send events to clients
+- [X] understand why i did `getSend`
+  - i never did. i just did something far more straightforward and it was fine. i was struggling the last time i worked on this...
+- [X] fix script contexts' ability to send events to clients
+- [X] refresh bare bones client
+- [ ] add create
+- [ ] add dig
