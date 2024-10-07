@@ -336,6 +336,20 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 						uio.errs <- err
 					}
 				}()
+			case "inv":
+				go func() {
+					err = s.handleInv(*avatar, cmd)
+					if err != nil {
+						uio.errs <- err
+					}
+				}()
+			case "create":
+				go func() {
+					err = s.handleCreate(*avatar, cmd)
+					if err != nil {
+						uio.errs <- err
+					}
+				}()
 			default:
 				go func() {
 					err = s.handleCmd(*avatar, cmd)
@@ -354,6 +368,57 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 			return nil
 		}
 	}
+}
+
+// TODO handleDrop
+// TODO handleGet
+// TODO handleLock
+// TODO handleUnlock
+// TODO handleUpdateObj
+
+func (s *gameWorldServer) handleInv(avatar db.Object, cmd *proto.Command) error {
+	uid := uint32(avatar.OwnerID)
+
+	os, err := avatar.Contents(s.db)
+	if err != nil {
+		return err
+	}
+
+	msg := "You rummage in your pockets and find:"
+
+	for _, o := range os {
+		msg += fmt.Sprintf("\n\t- %s", o.GetData("name"))
+	}
+
+	s.sessions[uid].outbound <- &proto.WorldEvent{
+		Type: proto.WorldEvent_PRINT,
+		Text: &msg,
+	}
+
+	return nil
+
+}
+
+func (s *gameWorldServer) handleCreate(avatar db.Object, cmd *proto.Command) error {
+	uid := uint32(avatar.OwnerID)
+
+	o := db.NewObject(uid)
+
+	err := o.Save(s.db)
+	if err != nil {
+		return err
+	}
+
+	msg := `the air right in front of you solidifies. you hear a small crack. something has fallen into your pocket. use /inv to see what you are holding.`
+
+	s.db.MoveInto(*o, avatar)
+
+	s.sessions[uid].outbound <- &proto.WorldEvent{
+		Type: proto.WorldEvent_PRINT,
+		Text: &msg,
+	}
+
+	return nil
 }
 
 func (s *gameWorldServer) handleDig(avatar db.Object, cmd *proto.Command) error {
@@ -431,7 +496,7 @@ func (s *gameWorldServer) handleCmd(avatar db.Object, cmd *proto.Command) error 
 	}
 
 	for _, o := range affected {
-		if err = s.verbHandler(cmd.Verb, cmd.Rest, avatar, o); err != nil {
+		if err = s.verbHandler(cmd.Verb, cmd.Rest, avatar, *o); err != nil {
 			log.Printf("error handling verb %s for object %d: %s", cmd.Verb, o.ID, err)
 		}
 	}

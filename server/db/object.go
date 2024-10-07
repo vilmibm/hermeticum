@@ -104,6 +104,14 @@ func (o *Object) SetData(key string, value string) {
 	o.Data[key] = value
 }
 
+func (o *Object) GetData(key string) string {
+	v, ok := o.Data[key]
+	if !ok {
+		return ""
+	}
+	return v
+}
+
 func (o *Object) SetScript(code string) {
 	// TODO use a formatter
 	o.script = strings.TrimSpace(code)
@@ -223,19 +231,19 @@ func (o *Object) Container(db *DB) (*Object, error) {
 	return ObjectByID(db, containerID)
 }
 
-func (o *Object) Earshot(db *DB) ([]Object, error) {
+func (o *Object) Earshot(db *DB) ([]*Object, error) {
 	stmt := `
-	SELECT id FROM objects WHERE id IN (
-		SELECT contained FROM contains
-		WHERE container = (
-				SELECT container FROM contains WHERE contained = $1 LIMIT 1))
-		OR id = (SELECT container FROM contains WHERE contained = $1 LIMIT 1)`
+	SELECT id FROM objects WHERE
+		id IN (SELECT contained FROM contains WHERE container = (
+						SELECT container FROM contains WHERE contained = $1 LIMIT 1))
+		OR id = (SELECT container FROM contains WHERE contained = $1 LIMIT 1)
+		OR id IN (SELECT contained FROM contains WHERE container = $1)`
 	rows, err := db.pool.Query(context.Background(), stmt, o.ID)
 	if err != nil {
 		return nil, err
 	}
 
-	out := []Object{}
+	out := []*Object{}
 
 	for rows.Next() {
 		var heardID int
@@ -247,7 +255,32 @@ func (o *Object) Earshot(db *DB) ([]Object, error) {
 			return nil, err
 		}
 
-		out = append(out, *heard)
+		out = append(out, heard)
+	}
+
+	return out, nil
+}
+
+func (o *Object) Contents(db *DB) ([]*Object, error) {
+	stmt := `SELECT contained FROM contains WHERE container = $1`
+	rows, err := db.pool.Query(context.Background(), stmt, o.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	out := []*Object{}
+
+	for rows.Next() {
+		var containedID int
+		if err := rows.Scan(&containedID); err != nil {
+			return nil, err
+		}
+		contained, err := ObjectByID(db, containedID)
+		if err != nil {
+			return nil, err
+		}
+
+		out = append(out, contained)
 	}
 
 	return out, nil

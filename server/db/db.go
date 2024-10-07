@@ -310,7 +310,7 @@ func (db *DB) Resolve(vantage Object, term string) ([]Object, error) {
 
 	for _, o := range stuff {
 		if strings.Contains(o.Data["name"], term) {
-			out = append(out, o)
+			out = append(out, *o)
 		}
 	}
 

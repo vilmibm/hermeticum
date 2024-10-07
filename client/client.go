@@ -58,6 +58,8 @@ func (cs *ClientState) AddMessage(ev *proto.WorldEvent) {
 			fmt.Fprintf(cs.messagesView, "%s: %s\n", ev.GetSource(), ev.GetText())
 		case proto.WorldEvent_EMOTE:
 			fmt.Fprintf(cs.messagesView, "%s %s\n", ev.GetSource(), ev.GetText())
+		case proto.WorldEvent_PRINT:
+			fmt.Fprintf(cs.messagesView, "%s\n", ev.GetText())
 		default:
 			fmt.Fprintf(cs.messagesView, "%#v\n", ev)
 		}
