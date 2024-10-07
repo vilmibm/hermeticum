@@ -244,35 +244,6 @@ func (db *DB) MoveInto(toMove Object, container Object) error {
 	return tx.Commit(ctx)
 }
 
-func (db *DB) Earshot(obj Object) ([]Object, error) {
-	stmt := `
-	SELECT id, avatar, bedroom, data, owneruid, script FROM objects
-	WHERE id IN (
-		SELECT contained FROM contains
-		WHERE container = (
-				SELECT container FROM contains WHERE contained = $1 LIMIT 1))
-		OR id = (SELECT container FROM contains WHERE contained = $1 LIMIT 1)`
-	rows, err := db.pool.Query(context.Background(), stmt, obj.ID)
-	if err != nil {
-		return nil, err
-	}
-
-	out := []Object{}
-
-	for rows.Next() {
-		heard := Object{}
-		if err = rows.Scan(
-			&heard.ID, &heard.Avatar,
-			&heard.Bedroom, &heard.Data,
-			&heard.OwnerID, &heard.script); err != nil {
-			return nil, err
-		}
-		out = append(out, heard)
-	}
-
-	return out, nil
-}
-
 func (db *DB) GetObjectByID(ID int) (*Object, error) {
 	ctx := context.Background()
 	obj := &Object{}
@@ -330,7 +301,7 @@ func (db *DB) SearchObjectsByName(term string) ([]Object, error) {
 }
 
 func (db *DB) Resolve(vantage Object, term string) ([]Object, error) {
-	stuff, err := db.Earshot(vantage)
+	stuff, err := vantage.Earshot(db)
 	if err != nil {
 		return nil, err
 	}

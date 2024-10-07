@@ -276,7 +276,7 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 		s.sessionMutex.Lock()
 		delete(s.sessions, uid)
 		s.sessionMutex.Unlock()
-		affected, err := s.db.Earshot(*avatar)
+		affected, err := avatar.Earshot(s.db)
 		if err != nil {
 			log.Printf("error trying to inform others about a derez: %s", err.Error())
 			return
@@ -421,7 +421,7 @@ func (s *gameWorldServer) handleDig(avatar db.Object, cmd *proto.Command) error 
 }
 
 func (s *gameWorldServer) handleCmd(avatar db.Object, cmd *proto.Command) error {
-	affected, err := s.db.Earshot(avatar)
+	affected, err := avatar.Earshot(s.db)
 	if err != nil {
 		return err
 	}

@@ -222,3 +222,33 @@ func (o *Object) Container(db *DB) (*Object, error) {
 
 	return ObjectByID(db, containerID)
 }
+
+func (o *Object) Earshot(db *DB) ([]Object, error) {
+	stmt := `
+	SELECT id FROM objects WHERE id IN (
+		SELECT contained FROM contains
+		WHERE container = (
+				SELECT container FROM contains WHERE contained = $1 LIMIT 1))
+		OR id = (SELECT container FROM contains WHERE contained = $1 LIMIT 1)`
+	rows, err := db.pool.Query(context.Background(), stmt, o.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	out := []Object{}
+
+	for rows.Next() {
+		var heardID int
+		if err := rows.Scan(&heardID); err != nil {
+			return nil, err
+		}
+		heard, err := ObjectByID(db, heardID)
+		if err != nil {
+			return nil, err
+		}
+
+		out = append(out, *heard)
+	}
+
+	return out, nil
+}
