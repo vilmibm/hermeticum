@@ -124,7 +124,7 @@ func (o *Object) GetScript() string {
 func (o *Object) hasInvocation() string {
 	hi := "has({\n"
 	for k, v := range o.Data {
-		hi += fmt.Sprintf(`%s = "%s",`, k, v) + "\n"
+		hi += fmt.Sprintf(`  %s = "%s",`, k, v) + "\n"
 	}
 	hi += "})"
 
@@ -132,8 +132,14 @@ func (o *Object) hasInvocation() string {
 }
 
 func (o *Object) allowsInvocation() string {
-	// TODO
-	return "allows()"
+	return fmt.Sprintf(`
+allows({
+	read = "%s",
+	write = "%s",
+	carry = "%s",
+	execute = "%s",
+})`, o.Perms.Read, o.Perms.Write, o.Perms.Carry, o.Perms.Exec)
+
 }
 
 func (o *Object) Save(db *DB) error {

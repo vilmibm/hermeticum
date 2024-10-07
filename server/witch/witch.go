@@ -18,6 +18,11 @@ import (
 )
 
 /*
+has({
+	name = "a room",
+	description = "it's empty",
+})
+
 allows({
   read = "world",
   write = "owner"
