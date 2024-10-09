@@ -338,6 +338,10 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 				handler = s.handleDig
 			case "inv":
 				handler = s.handleInv
+			case "get":
+				handler = s.handleGet
+			case "drop":
+				handler = s.handleDrop
 			case "create":
 				handler = s.handleCreate
 			default:
@@ -365,10 +369,131 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 }
 
 // TODO handleDrop
-// TODO handleGet
 // TODO handleLock
 // TODO handleUnlock
 // TODO handleUpdateObj
+
+func (s *gameWorldServer) printTo(avatar db.Object, msg string) {
+	s.sessions[uint32(avatar.OwnerID)].outbound <- &proto.WorldEvent{
+		Type: proto.WorldEvent_PRINT,
+		Text: &msg,
+	}
+}
+
+func (s *gameWorldServer) handleDrop(avatar db.Object, cmd *proto.Command) error {
+	if cmd.Rest == "" {
+		s.printTo(avatar, "Drop what?")
+		return nil
+	}
+
+	cts, err := avatar.Contents(s.db)
+	if err != nil {
+		return err
+	}
+
+	if len(cts) == 0 {
+		s.printTo(avatar, "Your pockets are empty and thus you have nothing to drop.")
+		return nil
+	}
+
+	os := db.Filter(cts, cmd.Rest)
+
+	if len(os) == 0 {
+		s.printTo(avatar, fmt.Sprintf("You see nothing in your pockets called '%s'", cmd.Rest))
+		return nil
+	}
+
+	if len(os) > 1 {
+		// TODO might be nice to make this a helper (fuzzySelect or something)
+		msg := "could you be more specific? that might be a few things:\n"
+		for _, o := range os {
+			msg += fmt.Sprintf("- %s\n", o.String())
+		}
+		return nil
+	}
+
+	target := os[0]
+
+	room, err := avatar.Container(s.db)
+	if err != nil {
+		return err
+	}
+
+	// TODO if target is a room it now exists in the world as contained...FYI...
+
+	err = target.MoveInto(s.db, *room)
+	if err != nil {
+		return err
+	}
+
+	s.printTo(avatar, fmt.Sprintf(
+		"you pull %s from your pocket and drop it in %s.",
+		target.String(), room.String()))
+
+	return nil
+}
+
+func (s *gameWorldServer) handleGet(avatar db.Object, cmd *proto.Command) error {
+	if cmd.Rest == "" {
+		s.printTo(avatar, "get what?")
+		return nil
+	}
+	room, err := avatar.Container(s.db)
+	if err != nil {
+		return err
+	}
+
+	eshot, err := avatar.Earshot(s.db)
+	if err != nil {
+		return err
+	}
+
+	os := db.Filter(eshot, cmd.Rest)
+
+	if len(os) == 0 {
+		s.printTo(avatar, fmt.Sprintf("You see nothing nearby called '%s'", cmd.Rest))
+		return nil
+	}
+
+	if len(os) > 1 {
+		msg := "could you be more specific? that might be a few things:\n"
+		for _, o := range os {
+			msg += fmt.Sprintf("- %s\n", o.String())
+		}
+		return nil
+	}
+
+	target := os[0]
+
+	if target.ID == avatar.ID {
+		s.printTo(avatar, "You find yourself unable to put yourself into your own pocket.")
+		return nil
+	}
+
+	if target.Perms.Carry == db.PermOwner && avatar.OwnerID != target.OwnerID {
+		s.printTo(avatar, fmt.Sprintf("struggle as you might, you just cannot will %s into your hands", target.String()))
+		return nil
+	}
+
+	err = target.MoveInto(s.db, avatar)
+	if err != nil {
+		return err
+	}
+
+	if target.ID == room.ID {
+		foyer, err := db.ObjectByOwnerName(s.db, 0, "foyer")
+		if err != nil {
+			return err
+		}
+		return avatar.MoveInto(s.db, *foyer)
+	}
+
+	s.printTo(avatar, fmt.Sprintf(
+		"you reach out your hand. %s springs into it. you drop it into your pocket.",
+		target.String()))
+
+	return nil
+}
 
 func (s *gameWorldServer) handleLook(avatar db.Object, cmd *proto.Command) error {
 	uid := uint32(avatar.OwnerID)
@@ -379,10 +504,10 @@ func (s *gameWorldServer) handleLook(avatar db.Object, cmd *proto.Command) error
 	}
 
 	msg := fmt.Sprintf(`
-You are in %s. %s.
+You are in %s (%d). %s.
 
 You can see:
-`, room.GetData("name"), room.GetData("description"))
+`, room.GetData("name"), room.ID, room.GetData("description"))
 
 	os, err := room.Contents(s.db)
 	if err != nil {
@@ -394,7 +519,7 @@ You can see:
 		if o.ID == avatar.ID {
 			youMsg = " (that's you!)"
 		}
-		msg += fmt.Sprintf("- %s%s\n", o.GetData("name"), youMsg)
+		msg += fmt.Sprintf("- %s (%d)%s\n", o.GetData("name"), o.ID, youMsg)
 	}
 
 	inv, err := avatar.Contents(s.db)
@@ -443,8 +568,14 @@ func (s *gameWorldServer) handleInv(avatar db.Object, cmd *proto.Command) error 
 		Text: &msg,
 	}
 
-	return nil
+	for _, o := range os {
+		log.Printf("%s heard %s from %d", o.GetData("name"), "look", avatar.ID)
+		if err = s.verbHandler("look", "", avatar, *o); err != nil {
+			log.Printf("error handling verb %s for object %d: %s", cmd.Verb, o.ID, err)
+		}
+	}
 
+	return nil
 }
 
 func (s *gameWorldServer) handleCreate(avatar db.Object, cmd *proto.Command) error {

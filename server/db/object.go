@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -257,6 +258,50 @@ func (o *Object) Earshot(db *DB) ([]*Object, error) {
 	return out, nil
 }
 
+func Filter(os []*Object, term string) []*Object {
+	out := []*Object{}
+
+	id, err := strconv.Atoi(term)
+	if err == nil {
+		for _, o := range os {
+			if o.ID == id {
+				out = append(out, o)
+			}
+		}
+	} else {
+		for _, o := range os {
+			if strings.Contains(o.Data["name"], term) {
+				out = append(out, o)
+			}
+		}
+	}
+
+	return out
+}
+
+func (o *Object) MoveInto(db *DB, container Object) error {
+	ctx := context.Background()
+	tx, err := db.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	stmt := "DELETE FROM contains WHERE contained = $1"
+	_, err = tx.Exec(ctx, stmt, o.ID)
+	if err != nil {
+		return err
+	}
+
+	stmt = "INSERT INTO contains (contained, container) VALUES ($1, $2)"
+	_, err = tx.Exec(ctx, stmt, o.ID, container.ID)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
 func (o *Object) Contents(db *DB) ([]*Object, error) {
 	stmt := `SELECT contained FROM contains WHERE container = $1`
 	rows, err := db.pool.Query(context.Background(), stmt, o.ID)
@@ -280,4 +325,8 @@ func (o *Object) Contents(db *DB) ([]*Object, error) {
 	}
 
 	return out, nil
+}
+
+func (o *Object) String() string {
+	return fmt.Sprintf("%s (%d)", o.GetData("name"), o.ID)
 }
