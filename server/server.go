@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/user"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -323,40 +324,24 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 	}
 
 	for {
+		var handler func(db.Object, *proto.Command) error
+		var cmd *proto.Command
 		select {
-		case cmd := <-uio.inbound:
+		case cmd = <-uio.inbound:
 			log.Printf("cmd %s %s from uid %d", cmd.Verb, cmd.Rest, uid)
 			switch cmd.Verb {
+			case "look":
+				handler = s.handleLook
 			case "quit":
 				uio.done <- true
 			case "dig":
-				go func() {
-					err = s.handleDig(*avatar, cmd)
-					if err != nil {
-						uio.errs <- err
-					}
-				}()
+				handler = s.handleDig
 			case "inv":
-				go func() {
-					err = s.handleInv(*avatar, cmd)
-					if err != nil {
-						uio.errs <- err
-					}
-				}()
+				handler = s.handleInv
 			case "create":
-				go func() {
-					err = s.handleCreate(*avatar, cmd)
-					if err != nil {
-						uio.errs <- err
-					}
-				}()
+				handler = s.handleCreate
 			default:
-				go func() {
-					err = s.handleCmd(*avatar, cmd)
-					if err != nil {
-						uio.errs <- err
-					}
-				}()
+				handler = s.handleCmd
 			}
 		case ev := <-uio.outbound:
 			if err := stream.Send(ev); err != nil {
@@ -367,6 +352,15 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 		case <-uio.done:
 			return nil
 		}
+
+		if handler != nil {
+			go func() {
+				err = handler(*avatar, cmd)
+				if err != nil {
+					uio.errs <- err
+				}
+			}()
+		}
 	}
 }
 
@@ -375,6 +369,56 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 // TODO handleLock
 // TODO handleUnlock
 // TODO handleUpdateObj
+
+func (s *gameWorldServer) handleLook(avatar db.Object, cmd *proto.Command) error {
+	uid := uint32(avatar.OwnerID)
+
+	room, err := avatar.Container(s.db)
+	if err != nil {
+		return err
+	}
+
+	msg := fmt.Sprintf(`
+You are in %s. %s.
+
+You can see:
+`, room.GetData("name"), room.GetData("description"))
+
+	os, err := room.Contents(s.db)
+	if err != nil {
+		return err
+	}
+
+	for _, o := range os {
+		youMsg := ""
+		if o.ID == avatar.ID {
+			youMsg = " (that's you!)"
+		}
+		msg += fmt.Sprintf("- %s%s\n", o.GetData("name"), youMsg)
+	}
+
+	inv, err := avatar.Contents(s.db)
+	if err != nil {
+		return err
+	}
+
+	counter := "things"
+	if len(inv) == 1 {
+		counter = "thing"
+	}
+
+	msg += fmt.Sprintf("\nYour pockets contain %d %s. Use /inv to look in your pockets.",
+		len(inv), counter)
+
+	msg = strings.TrimSpace(msg)
+
+	s.sessions[uid].outbound <- &proto.WorldEvent{
+		Type: proto.WorldEvent_PRINT,
+		Text: &msg,
+	}
+
+	return s.handleCmd(avatar, cmd)
+}
 
 func (s *gameWorldServer) handleInv(avatar db.Object, cmd *proto.Command) error {
 	uid := uint32(avatar.OwnerID)
@@ -388,6 +432,10 @@ func (s *gameWorldServer) handleInv(avatar db.Object, cmd *proto.Command) error 
 
 	for _, o := range os {
 		msg += fmt.Sprintf("\n\t- %s", o.GetData("name"))
+	}
+
+	if len(os) == 0 {
+		msg += "\n\tnothing."
 	}
 
 	s.sessions[uid].outbound <- &proto.WorldEvent{

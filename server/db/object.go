@@ -11,10 +11,7 @@ type Perm string
 const (
 	PermWorld  Perm = "world"
 	PermOwner  Perm = "owner"
-	baseScript      = `
-seen(function()
-	tellSender(my("description"))
-end)`
+	baseScript      = ""
 )
 
 type Object struct {
@@ -236,8 +233,7 @@ func (o *Object) Earshot(db *DB) ([]*Object, error) {
 	SELECT id FROM objects WHERE
 		id IN (SELECT contained FROM contains WHERE container = (
 						SELECT container FROM contains WHERE contained = $1 LIMIT 1))
-		OR id = (SELECT container FROM contains WHERE contained = $1 LIMIT 1)
-		OR id IN (SELECT contained FROM contains WHERE container = $1)`
+		OR id = (SELECT container FROM contains WHERE contained = $1 LIMIT 1)`
 	rows, err := db.pool.Query(context.Background(), stmt, o.ID)
 	if err != nil {
 		return nil, err

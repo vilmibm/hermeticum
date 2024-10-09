@@ -104,7 +104,7 @@ func (db *DB) Ensure() error {
 		// TODO actually check error. for now assuming it means does not exist
 		foyer = NewRoom(rootuid)
 		foyer.SetData("name", "foyer")
-		foyer.SetData("description", "a big room. the ceiling is painted with constellations.")
+		foyer.SetData("description", "a big room. the ceiling is painted with constellations")
 		if err = foyer.Save(db); err != nil {
 			return err
 		}
