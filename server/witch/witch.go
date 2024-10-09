@@ -210,7 +210,7 @@ func NewScriptContext(db *db.DB, clientSend func(uint32, *proto.WorldEvent)) (*S
 						log.Println(err.Error())
 						return
 					}
-					if err = db.MoveInto(*senderObj, *container); err != nil {
+					if err = senderObj.MoveInto(db, *container); err != nil {
 						log.Println(err.Error())
 					}
 
@@ -372,7 +372,7 @@ func (sc *ScriptContext) wGoes(l *lua.LState) int {
 		if normalized.Equals(direction) {
 			log.Printf("MOVING SENDER TO '%s'", targetRoom.Data["name"])
 			// TODO error checking
-			sc.db.MoveInto(*sender, *targetRoom)
+			sender.MoveInto(sc.db, *targetRoom)
 			sc.serverAPI.Tell(targetRoom.ID, sender.ID, fmt.Sprintf("you are now in %s", targetRoom.Data["name"]))
 		}
 		return

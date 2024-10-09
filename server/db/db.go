@@ -99,7 +99,7 @@ func (db *DB) Ensure() error {
 
 	rootuid := uint32(uid)
 
-	foyer, err := ObjectByOwnerName(db, rootuid, "foyer")
+	foyer, err := db.ObjectByOwnerName(rootuid, "foyer")
 	if err != nil {
 		// TODO actually check error. for now assuming it means does not exist
 		foyer = NewRoom(rootuid)
@@ -110,7 +110,7 @@ func (db *DB) Ensure() error {
 		}
 	}
 
-	egg, err := ObjectByOwnerName(db, rootuid, "floor egg")
+	egg, err := db.ObjectByOwnerName(rootuid, "floor egg")
 	if err != nil {
 		// TODO actually check error. for now assuming it means does not exist
 		egg = NewObject(rootuid)
@@ -122,7 +122,7 @@ func (db *DB) Ensure() error {
 		}
 	}
 
-	pub, err := ObjectByOwnerName(db, rootuid, "pub")
+	pub, err := db.ObjectByOwnerName(rootuid, "pub")
 	if err != nil {
 		// TODO actually check error. for now assuming it means does not exist
 		pub = NewRoom(rootuid)
@@ -133,7 +133,7 @@ func (db *DB) Ensure() error {
 		}
 	}
 
-	oakDoor, err := ObjectByOwnerName(db, rootuid, "oak door")
+	oakDoor, err := db.ObjectByOwnerName(rootuid, "oak door")
 	if err != nil {
 		// TODO actually check error. for now assuming it means does not exist
 		oakDoor = NewObject(rootuid)
@@ -146,7 +146,7 @@ func (db *DB) Ensure() error {
 		}
 	}
 
-	revOakDoor, err := ObjectByOwnerName(db, rootuid, "oak door out")
+	revOakDoor, err := db.ObjectByOwnerName(rootuid, "oak door out")
 	if err != nil {
 		// TODO actually check error. for now assuming it means does not exist
 		revOakDoor = NewObject(rootuid)
@@ -159,9 +159,9 @@ func (db *DB) Ensure() error {
 		}
 	}
 
-	db.MoveInto(*egg, *foyer)
-	db.MoveInto(*oakDoor, *foyer)
-	db.MoveInto(*revOakDoor, *pub)
+	egg.MoveInto(db, *foyer)
+	oakDoor.MoveInto(db, *foyer)
+	revOakDoor.MoveInto(db, *pub)
 
 	return nil
 }
@@ -219,29 +219,6 @@ func (db *DB) Derez(uid uint32) (err error) {
 	}
 
 	return
-}
-
-func (db *DB) MoveInto(toMove Object, container Object) error {
-	ctx := context.Background()
-	tx, err := db.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-
-	stmt := "DELETE FROM contains WHERE contained = $1"
-	_, err = tx.Exec(ctx, stmt, toMove.ID)
-	if err != nil {
-		return err
-	}
-
-	stmt = "INSERT INTO contains (contained, container) VALUES ($1, $2)"
-	_, err = tx.Exec(ctx, stmt, toMove.ID, container.ID)
-	if err != nil {
-		return err
-	}
-
-	return tx.Commit(ctx)
 }
 
 func (db *DB) GetObjectByID(ID int) (*Object, error) {
@@ -323,6 +300,23 @@ func (db *DB) GhostBust() error {
 		return fmt.Errorf("failed to bust ghosts: %w", err)
 	}
 	return nil
+}
+
+func (db *DB) ObjectByID(id int) (*Object, error) {
+	o := &Object{ID: id}
+	err := o.Refresh(db)
+	return o, err
+}
+
+func (db *DB) ObjectByOwnerName(ownerid uint32, name string) (*Object, error) {
+	ctx := context.Background()
+	var oid int
+	s := "SELECT id FROM objects WHERE owneruid = $1 AND data['name'] = $2"
+	if err := db.pool.QueryRow(ctx, s, ownerid, fmt.Sprintf(`"%s"`, name)).Scan(&oid); err != nil {
+		return nil, err
+	}
+
+	return db.ObjectByID(oid)
 }
 
 func hasInvocation(obj *Object) string {

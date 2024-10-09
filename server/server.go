@@ -319,7 +319,7 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 		return fmt.Errorf("failed to find foyer: %w", err)
 	}
 
-	if err = s.db.MoveInto(*avatar, *foyer); err != nil {
+	if err = avatar.MoveInto(s.db, *foyer); err != nil {
 		return fmt.Errorf("failed to move %d into %d: %w", avatar.ID, foyer.ID, err)
 	}
 
@@ -368,7 +368,6 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 	}
 }
 
-// TODO handleDrop
 // TODO handleLock
 // TODO handleUnlock
 // TODO handleUpdateObj
@@ -481,7 +480,7 @@ func (s *gameWorldServer) handleGet(avatar db.Object, cmd *proto.Command) error 
 	}
 
 	if target.ID == room.ID {
-		foyer, err := db.ObjectByOwnerName(s.db, 0, "foyer")
+		foyer, err := s.db.ObjectByOwnerName(0, "foyer")
 		if err != nil {
 			return err
 		}
@@ -588,14 +587,10 @@ func (s *gameWorldServer) handleCreate(avatar db.Object, cmd *proto.Command) err
 		return err
 	}
 
-	msg := `the air right in front of you solidifies. you hear a small crack. something has fallen into your pocket. use /inv to see what you are holding.`
+	o.MoveInto(s.db, avatar)
 
-	s.db.MoveInto(*o, avatar)
-
-	s.sessions[uid].outbound <- &proto.WorldEvent{
-		Type: proto.WorldEvent_PRINT,
-		Text: &msg,
-	}
+	s.printTo(avatar,
+		"the air right in front of you solidifies. you hear a small crack. something has fallen into your pocket. use /inv to see what you are holding.")
 
 	return nil
 }
@@ -650,12 +645,12 @@ func (s *gameWorldServer) handleDig(avatar db.Object, cmd *proto.Command) error 
 		return err
 	}
 
-	err = s.db.MoveInto(*door, *currentRoom)
+	err = door.MoveInto(s.db, *currentRoom)
 	if err != nil {
 		return err
 	}
 
-	err = s.db.MoveInto(*revDoor, *room)
+	err = revDoor.MoveInto(s.db, *room)
 	if err != nil {
 		return err
 	}

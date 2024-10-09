@@ -200,24 +200,6 @@ func (o *Object) Refresh(db *DB) error {
 
 	return nil
 }
-
-func ObjectByID(db *DB, id int) (*Object, error) {
-	o := &Object{ID: id}
-	err := o.Refresh(db)
-	return o, err
-}
-
-func ObjectByOwnerName(db *DB, ownerid uint32, name string) (*Object, error) {
-	ctx := context.Background()
-	var oid int
-	s := "SELECT id FROM objects WHERE owneruid = $1 AND data['name'] = $2"
-	if err := db.pool.QueryRow(ctx, s, ownerid, fmt.Sprintf(`"%s"`, name)).Scan(&oid); err != nil {
-		return nil, err
-	}
-
-	return ObjectByID(db, oid)
-}
-
 func (o *Object) Container(db *DB) (*Object, error) {
 	s := "SELECT container FROM contains WHERE contained = $1"
 	var containerID int
@@ -226,7 +208,7 @@ func (o *Object) Container(db *DB) (*Object, error) {
 		return nil, err
 	}
 
-	return ObjectByID(db, containerID)
+	return db.ObjectByID(containerID)
 }
 
 func (o *Object) Earshot(db *DB) ([]*Object, error) {
@@ -247,7 +229,7 @@ func (o *Object) Earshot(db *DB) ([]*Object, error) {
 		if err := rows.Scan(&heardID); err != nil {
 			return nil, err
 		}
-		heard, err := ObjectByID(db, heardID)
+		heard, err := db.ObjectByID(heardID)
 		if err != nil {
 			return nil, err
 		}
@@ -316,7 +298,7 @@ func (o *Object) Contents(db *DB) ([]*Object, error) {
 		if err := rows.Scan(&containedID); err != nil {
 			return nil, err
 		}
-		contained, err := ObjectByID(db, containedID)
+		contained, err := db.ObjectByID(containedID)
 		if err != nil {
 			return nil, err
 		}
