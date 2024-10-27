@@ -170,43 +170,40 @@ func newServer() (*gameWorldServer, error) {
 	return s, nil
 }
 
-func (s *gameWorldServer) verbHandler(verb, rest string, sender, target db.Object) error {
-	log.Printf("VH %s %s %d %d", verb, rest, sender.ID, target.ID)
+func (s *gameWorldServer) DB() *db.DB {
+	return s.db
+}
+
+func (s *gameWorldServer) verbHandler(verb, rest string, sender, receiver db.Object) error {
+	log.Printf("VH %s %s %d %d", verb, rest, sender.ID, receiver.ID)
 
 	// TODO check lock
 
-	if target.Perms.Exec == db.PermOwner && sender.ID != target.OwnerID {
+	if receiver.Perms.Exec == db.PermOwner && sender.ID != receiver.OwnerID {
 		return nil
 	}
 
 	s.scriptsMutex.RLock()
-	sc, ok := s.scripts[target.ID]
+	sc, ok := s.scripts[receiver.ID]
 	s.scriptsMutex.RUnlock()
 	var err error
 
-	clientSend := func(uid uint32, ev *proto.WorldEvent) {
-		if uio, ok := s.sessions[uid]; ok {
-			uio.outbound <- ev
-		} else {
-			// TODO log this
-		}
-	}
-
 	if !ok || sc == nil {
-		if sc, err = witch.NewScriptContext(s.db, clientSend); err != nil {
+		if sc, err = witch.NewScriptContext(s, receiver); err != nil {
 			return err
 		}
 
 		s.scriptsMutex.Lock()
-		s.scripts[target.ID] = sc
+		s.scripts[receiver.ID] = sc
 		s.scriptsMutex.Unlock()
+		sc.Run()
 	}
 
 	vc := witch.VerbContext{
-		Verb:   verb,
-		Rest:   rest,
-		Sender: sender,
-		Target: target,
+		Verb:     verb,
+		Rest:     rest,
+		Sender:   sender,
+		Receiver: receiver,
 	}
 
 	sc.Handle(vc)
@@ -372,16 +369,87 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 // TODO handleUnlock
 // TODO handleUpdateObj
 
-func (s *gameWorldServer) printTo(avatar db.Object, msg string) {
-	s.sessions[uint32(avatar.OwnerID)].outbound <- &proto.WorldEvent{
+func (s *gameWorldServer) PrintTo(avatar db.Object, msg string) {
+	s.SendTo(avatar, &proto.WorldEvent{
 		Type: proto.WorldEvent_PRINT,
 		Text: &msg,
+	})
+}
+
+func (s *gameWorldServer) SendTo(avatar db.Object, ev *proto.WorldEvent) {
+	s.sessions[uint32(avatar.OwnerID)].outbound <- ev
+}
+
+func (s *gameWorldServer) Show(fromObjID, toObjID int, action string) {
+	db := s.DB()
+	to, err := db.GetObjectByID(toObjID)
+	if err != nil {
+		log.Println(err)
+		return
 	}
+
+	if !to.Avatar {
+		log.Printf("tried to Tell a non avatar: from %d to %d '%s'",
+			fromObjID, toObjID, action)
+		return
+	}
+
+	from, err := db.GetObjectByID(fromObjID)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	speakerName := "an ethereal presence"
+	if from.Data["name"] != "" {
+		speakerName = from.Data["name"]
+	}
+
+	ev := proto.WorldEvent{
+		Type:   proto.WorldEvent_EMOTE,
+		Text:   &action,
+		Source: &speakerName,
+	}
+	s.SendTo(*to, &ev)
+}
+
+func (s *gameWorldServer) Tell(fromObjID, toObjID int, msg string) {
+	log.Printf("Tell: %d %d %s", fromObjID, toObjID, msg)
+	db := s.DB()
+
+	to, err := db.GetObjectByID(toObjID)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	if !to.Avatar {
+		log.Printf("tried to Tell a non avatar: from %d to %d '%s'", fromObjID, toObjID, msg)
+		return
+	}
+
+	from, err := db.GetObjectByID(fromObjID)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	speakerName := "an ethereal presence"
+	if from.Data["name"] != "" {
+		speakerName = from.Data["name"]
+	}
+
+	ev := proto.WorldEvent{
+		Type:   proto.WorldEvent_OVERHEARD,
+		Text:   &msg,
+		Source: &speakerName,
+	}
+	s.SendTo(*to, &ev)
 }
 
 func (s *gameWorldServer) handleDrop(avatar db.Object, cmd *proto.Command) error {
 	if cmd.Rest == "" {
-		s.printTo(avatar, "Drop what?")
+		s.PrintTo(avatar, "Drop what?")
 		return nil
 	}
 
@@ -391,14 +459,14 @@ func (s *gameWorldServer) handleDrop(avatar db.Object, cmd *proto.Command) error
 	}
 
 	if len(cts) == 0 {
-		s.printTo(avatar, "Your pockets are empty and thus you have nothing to drop.")
+		s.PrintTo(avatar, "Your pockets are empty and thus you have nothing to drop.")
 		return nil
 	}
 
 	os := db.Filter(cts, cmd.Rest)
 
 	if len(os) == 0 {
-		s.printTo(avatar, fmt.Sprintf("You see nothing in your pockets called '%s'", cmd.Rest))
+		s.PrintTo(avatar, fmt.Sprintf("You see nothing in your pockets called '%s'", cmd.Rest))
 		return nil
 	}
 
@@ -425,7 +493,7 @@ func (s *gameWorldServer) handleDrop(avatar db.Object, cmd *proto.Command) error
 		return err
 	}
 
-	s.printTo(avatar, fmt.Sprintf(
+	s.PrintTo(avatar, fmt.Sprintf(
 		"you pull %s from your pocket and drop it in %s.",
 		target.String(), room.String()))
 
@@ -434,7 +502,7 @@ func (s *gameWorldServer) handleDrop(avatar db.Object, cmd *proto.Command) error
 
 func (s *gameWorldServer) handleGet(avatar db.Object, cmd *proto.Command) error {
 	if cmd.Rest == "" {
-		s.printTo(avatar, "get what?")
+		s.PrintTo(avatar, "get what?")
 		return nil
 	}
 	room, err := avatar.Container(s.db)
@@ -450,7 +518,7 @@ func (s *gameWorldServer) handleGet(avatar db.Object, cmd *proto.Command) error 
 	os := db.Filter(eshot, cmd.Rest)
 
 	if len(os) == 0 {
-		s.printTo(avatar, fmt.Sprintf("You see nothing nearby called '%s'", cmd.Rest))
+		s.PrintTo(avatar, fmt.Sprintf("You see nothing nearby called '%s'", cmd.Rest))
 		return nil
 	}
 
@@ -465,12 +533,12 @@ func (s *gameWorldServer) handleGet(avatar db.Object, cmd *proto.Command) error 
 	target := os[0]
 
 	if target.ID == avatar.ID {
-		s.printTo(avatar, "You find yourself unable to put yourself into your own pocket.")
+		s.PrintTo(avatar, "You find yourself unable to put yourself into your own pocket.")
 		return nil
 	}
 
 	if target.Perms.Carry == db.PermOwner && avatar.OwnerID != target.OwnerID {
-		s.printTo(avatar, fmt.Sprintf("struggle as you might, you just cannot will %s into your hands", target.String()))
+		s.PrintTo(avatar, fmt.Sprintf("struggle as you might, you just cannot will %s into your hands", target.String()))
 		return nil
 	}
 
@@ -487,7 +555,7 @@ func (s *gameWorldServer) handleGet(avatar db.Object, cmd *proto.Command) error 
 		return avatar.MoveInto(s.db, *foyer)
 	}
 
-	s.printTo(avatar, fmt.Sprintf(
+	s.PrintTo(avatar, fmt.Sprintf(
 		"you reach out your hand. %s springs into it. you drop it into your pocket.",
 		target.String()))
 
@@ -589,7 +657,7 @@ func (s *gameWorldServer) handleCreate(avatar db.Object, cmd *proto.Command) err
 
 	o.MoveInto(s.db, avatar)
 
-	s.printTo(avatar,
+	s.PrintTo(avatar,
 		"the air right in front of you solidifies. you hear a small crack. something has fallen into your pocket. use /inv to see what you are holding.")
 
 	return nil

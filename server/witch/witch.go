@@ -1,11 +1,5 @@
 package witch
 
-/*
-
-This file is the interface between the game server and WITCH execution
-
-*/
-
 import (
 	"fmt"
 	"log"
@@ -36,139 +30,100 @@ end)
 `
 */
 
-type serverAPI struct {
-	db         *db.DB
-	clientSend func(uint32, *proto.WorldEvent)
-}
-
-func (s *serverAPI) Tell(fromObjID, toObjID int, msg string) {
-	log.Printf("Tell: %d %d %s", fromObjID, toObjID, msg)
-
-	to, err := s.db.GetObjectByID(toObjID)
-	if err != nil {
-		log.Println(err)
-		return
-	}
-
-	if !to.Avatar {
-		log.Printf("tried to Tell a non avatar: from %d to %d '%s'", fromObjID, toObjID, msg)
-		return
-	}
-
-	from, err := s.db.GetObjectByID(fromObjID)
-	if err != nil {
-		log.Println(err)
-		return
-	}
-
-	speakerName := "an ethereal presence"
-	if from.Data["name"] != "" {
-		speakerName = from.Data["name"]
-	}
-
-	ev := proto.WorldEvent{
-		Type:   proto.WorldEvent_OVERHEARD,
-		Text:   &msg,
-		Source: &speakerName,
-	}
-	s.clientSend(uint32(to.OwnerID), &ev)
-}
-
-func (s *serverAPI) Show(fromObjID, toObjID int, action string) {
-	to, err := s.db.GetObjectByID(toObjID)
-	if err != nil {
-		log.Println(err)
-		return
-	}
-
-	if !to.Avatar {
-		log.Printf("tried to Tell a non avatar: from %d to %d '%s'",
-			fromObjID, toObjID, action)
-		return
-	}
-
-	from, err := s.db.GetObjectByID(fromObjID)
-	if err != nil {
-		log.Println(err)
-		return
-	}
-
-	speakerName := "an ethereal presence"
-	if from.Data["name"] != "" {
-		speakerName = from.Data["name"]
-	}
-
-	ev := proto.WorldEvent{
-		Type:   proto.WorldEvent_EMOTE,
-		Text:   &action,
-		Source: &speakerName,
-	}
-	s.clientSend(uint32(to.OwnerID), &ev)
-}
-
-func (s *serverAPI) DB() *db.DB {
-	return s.db
-}
-
+/*
+VerbContext represents an event that was issued from one object (perhaps a
+player avatar) and heard/seen by another object.
+*/
 type VerbContext struct {
-	Verb   string
-	Rest   string
-	Sender db.Object
-	Target db.Object
+	Verb     string
+	Rest     string
+	Sender   db.Object
+	Receiver db.Object
 }
 
+/*
+ScriptContext provides state for executing the script of a WITCH object.  Every
+WITCH object should have at most one of these in memory able to receive events
+on a channel; it is up to the server to handle ScriptContext creation and
+book-keeping such as lazy creation and mutex'ed storage of contexts.
+*/
 type ScriptContext struct {
-	db         *db.DB
-	clientSend func(uint32, *proto.WorldEvent)
-	script     string
-	incoming   chan VerbContext
-	serverAPI  serverAPI
+	db       *db.DB
+	script   string
+	incoming chan VerbContext
+	lState   *lua.LState
+	obj      db.Object
+	server   GameWorldServer
 }
 
-func NewScriptContext(db *db.DB, clientSend func(uint32, *proto.WorldEvent)) (*ScriptContext, error) {
+type GameWorldServer interface {
+	PrintTo(db.Object, string)
+	SendTo(db.Object, *proto.WorldEvent)
+	Show(int, int, string)
+	Tell(int, int, string)
+	DB() *db.DB
+}
+
+func NewScriptContext(s GameWorldServer, obj db.Object) (*ScriptContext, error) {
 	sc := &ScriptContext{
-		serverAPI: serverAPI{db: db, clientSend: clientSend},
-		db:        db,
+		db:     s.DB(),
+		server: s,
+		obj:    obj,
 	}
 	sc.incoming = make(chan VerbContext)
 
+	return sc, nil
+}
+
+func (sc *ScriptContext) initLua(obj db.Object) error {
+	l := sc.lState
+
+	// direction constants
+	l.SetGlobal("east", lua.LString(dirEast))
+	l.SetGlobal("west", lua.LString(dirWest))
+	l.SetGlobal("north", lua.LString(dirNorth))
+	l.SetGlobal("south", lua.LString(dirSouth))
+	l.SetGlobal("above", lua.LString(dirAbove))
+	l.SetGlobal("below", lua.LString(dirBelow))
+	l.SetGlobal("up", lua.LString(dirAbove))
+	l.SetGlobal("down", lua.LString(dirBelow))
+
+	// witch object behavior functions
+	l.SetGlobal("allows", l.NewFunction(sc.wAllows))
+	l.SetGlobal("has", l.NewFunction(sc.wHas))
+	l.SetGlobal("hears", l.NewFunction(sc.wHears))
+	l.SetGlobal("sees", l.NewFunction(sc.wSees))
+	l.SetGlobal("goes", l.NewFunction(sc.wGoes))
+	l.SetGlobal("seen", l.NewFunction(sc.wSeen))
+	l.SetGlobal("my", l.NewFunction(sc.wMy))
+	l.SetGlobal("provides", l.NewFunction(sc.wProvides))
+
+	// witch helpers
+	l.SetGlobal("_handlers", l.NewTable())
+	l.SetGlobal("_ID", lua.LNumber(obj.ID))
+
+	return l.DoString(obj.GetScript())
+}
+
+func (sc *ScriptContext) Run() {
 	go func() {
-		var l *lua.LState
-		var err error
-		var vc VerbContext
 		for {
-			vc = <-sc.incoming
-			if vc.Target.GetScript() != sc.script {
-				sc.script = vc.Target.GetScript()
-				l = lua.NewState()
-
-				// direction constants
-				l.SetGlobal("east", lua.LString(dirEast))
-				l.SetGlobal("west", lua.LString(dirWest))
-				l.SetGlobal("north", lua.LString(dirNorth))
-				l.SetGlobal("south", lua.LString(dirSouth))
-				l.SetGlobal("above", lua.LString(dirAbove))
-				l.SetGlobal("below", lua.LString(dirBelow))
-				l.SetGlobal("up", lua.LString(dirAbove))
-				l.SetGlobal("down", lua.LString(dirBelow))
-
-				// witch object behavior functions
-				l.SetGlobal("allows", l.NewFunction(sc.wAllows))
-				l.SetGlobal("has", l.NewFunction(sc.wHas))
-				l.SetGlobal("hears", l.NewFunction(sc.wHears))
-				l.SetGlobal("sees", l.NewFunction(sc.wSees))
-				l.SetGlobal("goes", l.NewFunction(sc.wGoes))
-				l.SetGlobal("seen", l.NewFunction(sc.wSeen))
-				l.SetGlobal("my", l.NewFunction(sc.wMy))
-				l.SetGlobal("provides", l.NewFunction(sc.wProvides))
-
-				// witch helpers
-				l.SetGlobal("_handlers", l.NewTable())
-				l.SetGlobal("_ID", lua.LNumber(vc.Target.ID))
-
-				if err := l.DoString(vc.Target.GetScript()); err != nil {
-					log.Printf("error parsing script %s: %s", vc.Target.GetScript(), err.Error())
+			vc := <-sc.incoming
+			if vc.Receiver.ID != sc.obj.ID {
+				panic("wtf?")
+			}
+			if vc.Receiver.GetScript() != sc.script {
+				if err := sc.initLua(vc.Receiver); err != nil {
+					log.Printf("error parsing script %s: %s",
+						vc.Receiver.GetScript(), err.Error())
+				} else {
+					sc.script = vc.Receiver.GetScript()
 				}
+			}
+
+			l := sc.lState
+			if l == nil {
+				continue
 			}
 
 			// witch action functions relative to calling context
@@ -178,7 +133,7 @@ func NewScriptContext(db *db.DB, clientSend func(uint32, *proto.WorldEvent)) (*S
 				senderID := int(lua.LVAsNumber(sender.RawGetString("ID")))
 
 				log.Printf("tellMe: %d %s", senderID, l.ToString(1))
-				sc.serverAPI.Tell(senderID, vc.Target.ID, l.ToString(1))
+				sc.server.Tell(senderID, vc.Receiver.ID, l.ToString(1))
 				return 0
 			}))
 
@@ -187,7 +142,7 @@ func NewScriptContext(db *db.DB, clientSend func(uint32, *proto.WorldEvent)) (*S
 				senderID := int(lua.LVAsNumber(sender.RawGetString("ID")))
 
 				log.Printf("tellMe: %d %s", senderID, l.ToString(1))
-				sc.serverAPI.Tell(vc.Target.ID, senderID, l.ToString(1))
+				sc.server.Tell(vc.Receiver.ID, senderID, l.ToString(1))
 				return 0
 			}))
 
@@ -223,7 +178,7 @@ func NewScriptContext(db *db.DB, clientSend func(uint32, *proto.WorldEvent)) (*S
 				senderID := int(lua.LVAsNumber(sender.RawGetString("ID")))
 
 				log.Printf("showMe: %d %s", senderID, l.ToString(1))
-				sc.serverAPI.Show(senderID, vc.Target.ID, l.ToString(1))
+				sc.server.Show(senderID, vc.Receiver.ID, l.ToString(1))
 				return 0
 			}))
 
@@ -252,8 +207,9 @@ func NewScriptContext(db *db.DB, clientSend func(uint32, *proto.WorldEvent)) (*S
 						// TODO TODO TODO TODO TODO
 						// this could be a remote code execution vuln; but by being here, I
 						// believe vc.Verb has been effectively validated as "not a pile of
-						// lua code" since it matched a handler.
-						if err = l.DoString(fmt.Sprintf(`_handlers.%s["%s"]()`, vc.Verb, pattern)); err != nil {
+						// lua code" since it matched a handler. How thoroughly do I
+						// validate the handlers, though?
+						if err := l.DoString(fmt.Sprintf(`_handlers.%s["%s"]()`, vc.Verb, pattern)); err != nil {
 							log.Println(err.Error())
 						}
 					}
@@ -261,8 +217,6 @@ func NewScriptContext(db *db.DB, clientSend func(uint32, *proto.WorldEvent)) (*S
 			})
 		}
 	}()
-
-	return sc, nil
 }
 
 func (sc *ScriptContext) Handle(vc VerbContext) {
@@ -373,7 +327,18 @@ func (sc *ScriptContext) wGoes(l *lua.LState) int {
 			log.Printf("MOVING SENDER TO '%s'", targetRoom.Data["name"])
 			// TODO error checking
 			sender.MoveInto(sc.db, *targetRoom)
-			sc.serverAPI.Tell(targetRoom.ID, sender.ID, fmt.Sprintf("you are now in %s", targetRoom.Data["name"]))
+			sc.server.Tell(targetRoom.ID, sender.ID, fmt.Sprintf("you are now in %s", targetRoom.Data["name"]))
+			// TODO tell other avatars that person appeared
+			// TODO tell server to issue client updates for any avatars in this room
+			// TODO   this means having a protobuf version of Object
+
+			// TODO this also means rethinking this whole idea of witchAPI which I
+			// think is not so good. I want to have a clear API for witch programmers
+			// to use, yes, but that's not what witchAPI is. I seem to have done it
+			// to avoid having a pointer to the server itself from script contexts
+			// but...why not? Was there some locking issue? it's a pointer. so i want
+			// to experiment with flattening this out and letting witch code use
+			// server methods.
 		}
 		return
 	}
