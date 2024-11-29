@@ -69,6 +69,7 @@ func NewScriptContext(s GameWorldServer, obj db.Object) (*ScriptContext, error) 
 		db:     s.DB(),
 		server: s,
 		obj:    obj,
+		lState: lua.NewState(),
 	}
 	sc.incoming = make(chan VerbContext)
 
