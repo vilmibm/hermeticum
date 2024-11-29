@@ -383,7 +383,12 @@ func (s *gameWorldServer) SendStateUpdate(avatar db.Object) {
 		return
 	}
 
-	roomScript := "TODO check read perm"
+	roomScriptRaw := room.GetScript()
+	var roomScript *string
+	if avatar.Can("read", *room) {
+		roomScript = &roomScriptRaw
+	}
+
 	roomOwnerName := "TODO get owner name"
 
 	roomForState := proto.Object{
@@ -392,20 +397,24 @@ func (s *gameWorldServer) SendStateUpdate(avatar db.Object) {
 		Name:        room.String(),
 		Description: strings.TrimSpace(room.GetData("description")),
 		Avatar:      false,
-		Script:      &roomScript,
+		Script:      roomScript,
 	}
 	osForState := []*proto.Object{}
 
 	for _, o := range os {
 		ownerName := "TODO owner name"
-		script := "TODO check read perm"
+		scriptRaw := o.GetScript()
+		var script *string
+		if avatar.Can("read", *o) {
+			script = &scriptRaw
+		}
 		oForState := proto.Object{
 			Id:          uint64(o.ID),
 			Owner:       ownerName,
 			Name:        o.String(),
 			Description: strings.TrimSpace(o.GetData("description")),
 			Avatar:      o.Avatar,
-			Script:      &script,
+			Script:      script,
 		}
 		osForState = append(osForState, &oForState)
 	}

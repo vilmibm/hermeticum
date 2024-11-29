@@ -313,3 +313,25 @@ func (o *Object) Contents(db *DB) ([]*Object, error) {
 func (o *Object) String() string {
 	return fmt.Sprintf("%s (%d)", o.GetData("name"), o.ID)
 }
+
+func (o *Object) Can(perm string, other Object) bool {
+	if other.OwnerID == o.ID {
+		return true
+	}
+
+	var toCheck Perm
+	switch perm {
+	case "read":
+		toCheck = other.Perms.Read
+	case "write":
+		toCheck = other.Perms.Write
+	case "exec":
+		toCheck = other.Perms.Exec
+	case "carry":
+		toCheck = other.Perms.Carry
+	default:
+		panic("bad perm: " + perm)
+	}
+
+	return toCheck == PermWorld
+}
