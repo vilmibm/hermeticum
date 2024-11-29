@@ -320,6 +320,8 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 		return fmt.Errorf("failed to move %d into %d: %w", avatar.ID, foyer.ID, err)
 	}
 
+	go s.SendStateUpdate(*avatar)
+
 	for {
 		var handler func(db.Object, *proto.Command) error
 		var cmd *proto.Command
@@ -360,8 +362,63 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 				if err != nil {
 					uio.errs <- err
 				}
+				// TODO this is a double send if handler was handleCmd
+				s.SendStateUpdate(*avatar)
 			}()
 		}
+	}
+}
+
+func (s *gameWorldServer) SendStateUpdate(avatar db.Object) {
+	room, err := avatar.Container(s.db)
+	log.Printf("sending state update for %d", avatar.ID)
+	if err != nil {
+		// TODO log
+		return
+	}
+
+	os, err := room.Contents(s.db)
+	if err != nil {
+		// TODO log
+		return
+	}
+
+	roomScript := "TODO check read perm"
+	roomOwnerName := "TODO get owner name"
+
+	roomForState := proto.Object{
+		Id:          uint64(room.ID),
+		Owner:       roomOwnerName,
+		Name:        room.String(),
+		Description: strings.TrimSpace(room.GetData("description")),
+		Avatar:      false,
+		Script:      &roomScript,
+	}
+	osForState := []*proto.Object{}
+
+	for _, o := range os {
+		ownerName := "TODO owner name"
+		script := "TODO check read perm"
+		oForState := proto.Object{
+			Id:          uint64(o.ID),
+			Owner:       ownerName,
+			Name:        o.String(),
+			Description: strings.TrimSpace(o.GetData("description")),
+			Avatar:      o.Avatar,
+			Script:      &script,
+		}
+		osForState = append(osForState, &oForState)
+	}
+
+	for _, o := range os {
+		if !o.Avatar {
+			continue
+		}
+		s.SendTo(*o, &proto.WorldEvent{
+			Type:    proto.WorldEvent_STATE,
+			Objects: osForState,
+			Room:    &roomForState,
+		})
 	}
 }
 

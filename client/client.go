@@ -57,11 +57,15 @@ func (cs *ClientState) handleInbound(ev *proto.WorldEvent) {
 	cs.handleStateUpdate(ev)
 }
 
-const detailsTmpl = `{{room.Name}}
-{{room.Desc}}
+const detailsTmpl = `{{.Room.Name}}
+{{.Room.Description}}
 
-{{range objects}}
+{{range .Objects -}}
+{{if .Avatar -}}
+- *{{.Name}}
+{{else -}}
 - {{.Name}}
+{{end -}}
 {{end}}
 `
 

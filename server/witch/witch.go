@@ -59,6 +59,7 @@ type ScriptContext struct {
 type GameWorldServer interface {
 	PrintTo(db.Object, string)
 	SendTo(db.Object, *proto.WorldEvent)
+	SendStateUpdate(db.Object)
 	Show(int, int, string)
 	Tell(int, int, string)
 	DB() *db.DB
@@ -216,6 +217,7 @@ func (sc *ScriptContext) Run() {
 					}
 				})
 			})
+			sc.server.SendStateUpdate(vc.Sender)
 		}
 	}()
 }
@@ -330,16 +332,6 @@ func (sc *ScriptContext) wGoes(l *lua.LState) int {
 			sender.MoveInto(sc.db, *targetRoom)
 			sc.server.Tell(targetRoom.ID, sender.ID, fmt.Sprintf("you are now in %s", targetRoom.Data["name"]))
 			// TODO tell other avatars that person appeared
-			// TODO tell server to issue client updates for any avatars in this room
-			// TODO   this means having a protobuf version of Object
-
-			// TODO this also means rethinking this whole idea of witchAPI which I
-			// think is not so good. I want to have a clear API for witch programmers
-			// to use, yes, but that's not what witchAPI is. I seem to have done it
-			// to avoid having a pointer to the server itself from script contexts
-			// but...why not? Was there some locking issue? it's a pointer. so i want
-			// to experiment with flattening this out and letting witch code use
-			// server methods.
 		}
 		return
 	}
