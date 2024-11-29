@@ -16,6 +16,7 @@ const (
 )
 
 type Object struct {
+	// TODO eventually I want uint64 for ids
 	ID      int
 	Avatar  bool
 	Bedroom bool

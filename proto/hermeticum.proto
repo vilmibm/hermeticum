@@ -96,6 +96,15 @@ message Command {
   string rest = 2;
 }
 
+message Object {
+  uint64 id = 1;
+  string owner = 2;
+  string name = 3;
+  string description = 4;
+  bool avatar = 5;
+  optional string script = 6;
+}
+
 message WorldEvent {
   enum WorldEventType {
     WHISPER = 0;   // someone or something sent a private message to user
@@ -106,11 +115,14 @@ message WorldEvent {
     SHOUT = 5;     // a user spammed the world
     ENTER = 6;     // someone or something has appeared in room
     LEAVE = 7;     // someone or something has left room
+    STATE = 9;     // server wants to tell client about player's current room
   }
 
   WorldEventType type = 1;
   optional string source = 2;
   optional string text = 3;
+  optional Object room = 4;
+  repeated Object objects= 5;
 }
 
 message Pong {

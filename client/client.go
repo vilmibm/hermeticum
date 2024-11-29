@@ -1,12 +1,14 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -21,11 +23,15 @@ type ConnectOpts struct {
 
 type ClientState struct {
 	App          *tview.Application
+	details      *tview.TextView
 	Client       proto.GameWorldClient
 	MaxMessages  int
 	messagesView *tview.TextView
 	events       []*proto.WorldEvent
 	cio          *clientIO
+	currentRoom  *proto.Object
+	roomContents []*proto.Object
+	logger       *log.Logger
 }
 
 func (cs *ClientState) HandleInput(input string) {
@@ -41,6 +47,39 @@ func (cs *ClientState) HandleInput(input string) {
 		Rest: rest,
 	}
 	cs.cio.outbound <- cmd
+}
+
+func (cs *ClientState) handleInbound(ev *proto.WorldEvent) {
+	if ev.Type != proto.WorldEvent_STATE {
+		cs.AddMessage(ev)
+		return
+	}
+	cs.handleStateUpdate(ev)
+}
+
+const detailsTmpl = `{{room.Name}}
+{{room.Desc}}
+
+{{range objects}}
+- {{.Name}}
+{{end}}
+`
+
+func (cs *ClientState) handleStateUpdate(ev *proto.WorldEvent) {
+	dt, err := template.New("details").Parse(detailsTmpl)
+	if err != nil {
+		panic(err)
+	}
+
+	update := bytes.NewBufferString("")
+	err = dt.Execute(update, ev)
+	if err != nil {
+		cs.logger.Printf("failed to render details template: %s", err.Error())
+	}
+	cs.roomContents = ev.GetObjects()
+	cs.App.QueueUpdateDraw(func() {
+		cs.details.SetText(update.String())
+	})
 }
 
 func (cs *ClientState) AddMessage(ev *proto.WorldEvent) {
@@ -112,6 +151,7 @@ func Connect(opts ConnectOpts) error {
 		MaxMessages: 15, // TODO for testing
 		events:      []*proto.WorldEvent{},
 		cio:         cio,
+		logger:      log.Default(),
 	}
 
 	now := fmt.Sprintf("%d", time.Now().Unix())
@@ -137,6 +177,8 @@ func Connect(opts ConnectOpts) error {
 
 	msgView := tview.NewTextView().SetScrollable(true).SetWrap(true).SetWordWrap(true)
 	cs.messagesView = msgView
+	cs.details = tview.NewTextView().SetText("...")
+
 	gamePage := tview.NewGrid().
 		SetRows(1, 40, 3).
 		SetColumns(-1, -1).
@@ -151,7 +193,7 @@ func Connect(opts ConnectOpts) error {
 			msgView,
 			1, 0, 1, 1, 10, 20, false).
 		AddItem(
-			tview.NewTextView().SetText("TODO details"),
+			cs.details,
 			1, 1, 1, 1, 10, 10, false).
 		AddItem(
 			commandInput,
@@ -215,13 +257,24 @@ func Connect(opts ConnectOpts) error {
 	for {
 		select {
 		case ev := <-cio.inbound:
-			cs.AddMessage(ev)
+			cs.handleInbound(ev)
 		case cmd := <-cio.outbound:
 			if err := stream.Send(cmd); err != nil {
 				cio.errs <- err
 			}
 			if cmd.Verb == "quit" {
 				cio.done <- true
+			}
+			if cmd.Verb == "edit" {
+				// TODO need to resolve object and get its script. right now the client
+				// is dumb -- it just sends and receives strings. this is what
+				// motivated the idea of client state events.
+				//
+				// if the client maintains a list of every object in the current room
+				// that is updated when state messages are received, edit will always
+				// have the latest data for objects.
+				//
+				// I'll need a place in RAM to store "room contents"
 			}
 		case err := <-cio.errs:
 			log.Printf("error: %s", err.Error())
