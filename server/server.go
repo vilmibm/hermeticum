@@ -389,11 +389,15 @@ func (s *gameWorldServer) SendStateUpdate(avatar db.Object) {
 		roomScript = &roomScriptRaw
 	}
 
-	roomOwnerName := "TODO get owner name"
+	roomOwner, err := s.db.GetObjectByID(room.OwnerID)
+	if err != nil {
+		// TODO log
+		return
+	}
 
 	roomForState := proto.Object{
 		Id:          uint64(room.ID),
-		Owner:       roomOwnerName,
+		Owner:       roomOwner.String(),
 		Name:        room.String(),
 		Description: strings.TrimSpace(room.GetData("description")),
 		Avatar:      false,
@@ -402,7 +406,11 @@ func (s *gameWorldServer) SendStateUpdate(avatar db.Object) {
 	osForState := []*proto.Object{}
 
 	for _, o := range os {
-		ownerName := "TODO owner name"
+		owner, err := s.db.GetObjectByID(o.OwnerID)
+		if err != nil {
+			// TODO log
+			return
+		}
 		scriptRaw := o.GetScript()
 		var script *string
 		if avatar.Can("read", *o) {
@@ -410,7 +418,7 @@ func (s *gameWorldServer) SendStateUpdate(avatar db.Object) {
 		}
 		oForState := proto.Object{
 			Id:          uint64(o.ID),
-			Owner:       ownerName,
+			Owner:       owner.String(),
 			Name:        o.String(),
 			Description: strings.TrimSpace(o.GetData("description")),
 			Avatar:      o.Avatar,
