@@ -280,7 +280,7 @@ func (sc *ScriptContext) wSeen(l *lua.LState) int {
 	return 0
 }
 
-func (sc *ScriptContext) wDoes(ls *lua.LState) int {
+func (sc *ScriptContext) wDoes() int {
 	// TODO how to feed events back into the server?
 	// it needs to behave like an event showing up in Commands stream
 	// this handler needs a reference to the gateway which has a channel for sending events that the server will see?
