@@ -370,16 +370,17 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 }
 
 func (s *gameWorldServer) SendStateUpdate(avatar db.Object) {
-	room, err := avatar.Container(s.db)
 	log.Printf("sending state update for %d", avatar.ID)
+
+	room, err := avatar.Container(s.db)
 	if err != nil {
-		// TODO log
+		log.Printf("could not find current room: %s", err.Error())
 		return
 	}
 
 	os, err := room.Contents(s.db)
 	if err != nil {
-		// TODO log
+		log.Printf("could not get room contents: %s", err.Error())
 		return
 	}
 
@@ -389,9 +390,9 @@ func (s *gameWorldServer) SendStateUpdate(avatar db.Object) {
 		roomScript = &roomScriptRaw
 	}
 
-	roomOwner, err := s.db.GetObjectByID(room.OwnerID)
+	roomOwner, err := s.db.GetAvatarForUid(uint32(room.OwnerID))
 	if err != nil {
-		// TODO log
+		log.Printf("failed to find owner of current room: %s", err.Error())
 		return
 	}
 
@@ -406,9 +407,9 @@ func (s *gameWorldServer) SendStateUpdate(avatar db.Object) {
 	osForState := []*proto.Object{}
 
 	for _, o := range os {
-		owner, err := s.db.GetObjectByID(o.OwnerID)
+		owner, err := s.db.GetAvatarForUid(uint32(o.OwnerID))
 		if err != nil {
-			// TODO log
+			log.Println(err.Error())
 			return
 		}
 		scriptRaw := o.GetScript()
@@ -437,6 +438,7 @@ func (s *gameWorldServer) SendStateUpdate(avatar db.Object) {
 			Room:    &roomForState,
 		})
 	}
+	log.Printf("sent all state updates for %d", avatar.ID)
 }
 
 // TODO handleLock
