@@ -6,9 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
-	"os/exec"
-	"strconv"
 	"strings"
 	"text/template"
 	"time"
@@ -29,6 +26,9 @@ type model struct {
 	room     *proto.Object
 	contents []*proto.Object
 	viewport viewport.Model
+	cio      *clientIO
+	ctx      context.Context
+	err      error
 }
 
 func initialModel() model {
@@ -45,6 +45,14 @@ func initialModel() model {
 	vp := viewport.New(80, 20)
 	vp.SetContent("^_^")
 	prompt.KeyMap.InsertNewline.SetEnabled(false)
+	cio := &clientIO{
+		inbound:  make(chan *proto.WorldEvent),
+		outbound: make(chan *proto.Command),
+		errs:     make(chan error, 1),
+		done:     make(chan bool, 1),
+	}
+
+	ctx := context.Background()
 
 	return model{
 		prompt:   prompt,
@@ -52,15 +60,85 @@ func initialModel() model {
 		events:   []*proto.WorldEvent{},
 		room:     nil,
 		contents: []*proto.Object{},
+		cio:      cio,
+		ctx:      ctx,
 	}
 }
 
+func (m model) listen() tea.Cmd {
+	return func() tea.Msg {
+		return <-m.cio.inbound
+	}
+}
+
+func (m model) connect() tea.Msg {
+	gc, err := grpc.NewClient(
+		"unix:///tmp/hermeticum.sock",
+		grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return tea.Quit
+	}
+
+	client := proto.NewGameWorldClient(gc)
+
+	now := fmt.Sprintf("%d", time.Now().Unix())
+	if _, err = client.Ping(
+		m.ctx, &proto.PingMsg{When: now}); err != nil {
+		return tea.Quit
+	}
+
+	stream, err := client.ClientInput(m.ctx)
+	if err != nil {
+		return fmt.Errorf("could not create command stream: %w", err)
+	}
+
+	go func() {
+		for {
+			if ev, err := stream.Recv(); err != nil {
+				if err != io.EOF {
+					m.err = err
+				}
+				break
+			} else {
+				m.cio.inbound <- ev
+			}
+		}
+	}()
+
+	return nil
+}
+
 func (m model) Init() tea.Cmd {
-	return textarea.Blink
+	return tea.Batch(textarea.Blink, m.connect, m.listen())
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case *proto.WorldEvent:
+		if msg.Type != proto.WorldEvent_STATE {
+			m.events = append(m.events, msg)
+			vpContent := ""
+			for _, e := range m.events {
+				switch e.Type {
+				case proto.WorldEvent_OVERHEARD:
+					vpContent += fmt.Sprintf("%s: %s", e.GetSource(), e.GetText())
+				case proto.WorldEvent_EMOTE:
+					vpContent += fmt.Sprintf("%s %s", e.GetSource(), e.GetText())
+				case proto.WorldEvent_PRINT:
+					vpContent += fmt.Sprintf("%s", e.GetText())
+				default:
+					vpContent += fmt.Sprintf("%#v", e)
+				}
+				vpContent += "\n"
+			}
+
+			m.viewport.SetContent(vpContent)
+			m.viewport.GotoBottom()
+		} else {
+			// TODO update model once i have it (handleStateUpdate)
+			m.contents = msg.GetObjects()
+		}
+		return m, m.listen()
 	case tea.WindowSizeMsg:
 		m.viewport.Width = msg.Width
 		m.prompt.SetWidth(msg.Width)
@@ -286,23 +364,23 @@ func Connect(opts ConnectOpts) error {
 	//pages := tview.NewPages()
 	//pages.AddPage("game", gamePage, true, true)
 
-	ctx := context.Background()
+	//ctx := context.Background()
 
-	stream, err := cs.Client.ClientInput(ctx)
-	if err != nil {
-		return fmt.Errorf("could not create command stream: %w", err)
-	}
+	//stream, err := cs.Client.ClientInput(ctx)
+	//if err != nil {
+	//	return fmt.Errorf("could not create command stream: %w", err)
+	//}
 
-	go func() {
-		for {
-			if ev, err := stream.Recv(); err != nil {
-				cio.errs <- err
-				cio.done <- true
-			} else {
-				cio.inbound <- ev
-			}
-		}
-	}()
+	//go func() {
+	//	for {
+	//		if ev, err := stream.Recv(); err != nil {
+	//			cio.errs <- err
+	//			cio.done <- true
+	//		} else {
+	//			cio.inbound <- ev
+	//		}
+	//	}
+	//}()
 
 	//go func() {
 	//	err := app.SetRoot(pages, true).SetFocus(commandInput).Run()
@@ -337,90 +415,90 @@ func Connect(opts ConnectOpts) error {
 	//		cs.cio.outbound <- cmd
 	//	}
 	//}()
-	go func() {
-		for {
-			select {
-			case ev := <-cio.inbound:
-				cs.handleInbound(ev)
-			case cmd := <-cio.outbound:
-				if err := stream.Send(cmd); err != nil {
-					cio.errs <- err
-				}
-				if cmd.Verb == "quit" {
-					cio.done <- true
-				}
-				if cmd.Verb == "edit" {
-					var o *proto.Object
-					id, err := strconv.Atoi(cmd.Rest)
-					if err == nil {
-						o = resolveObjectById(cs.roomContents, id)
-					}
+	//go func() {
+	//	for {
+	//		select {
+	//		case ev := <-cio.inbound:
+	//			cs.handleInbound(ev)
+	//		case cmd := <-cio.outbound:
+	//			if err := stream.Send(cmd); err != nil {
+	//				cio.errs <- err
+	//			}
+	//			if cmd.Verb == "quit" {
+	//				cio.done <- true
+	//			}
+	//			if cmd.Verb == "edit" {
+	//				var o *proto.Object
+	//				id, err := strconv.Atoi(cmd.Rest)
+	//				if err == nil {
+	//					o = resolveObjectById(cs.roomContents, id)
+	//				}
 
-					if o == nil {
-						matches := resolveObjectByString(cs.roomContents, cmd.Rest)
-						if len(matches) == 1 {
-							o = matches[0]
-						} else if len(matches) > 1 {
-							// TODO fuzzy error
-							panic("non unique item")
-						}
-					}
+	//				if o == nil {
+	//					matches := resolveObjectByString(cs.roomContents, cmd.Rest)
+	//					if len(matches) == 1 {
+	//						o = matches[0]
+	//					} else if len(matches) > 1 {
+	//						// TODO fuzzy error
+	//						panic("non unique item")
+	//					}
+	//				}
 
-					if o == nil {
-						// TODO no such object error
-						panic("no such dingus, dingus")
-					}
+	//				if o == nil {
+	//					// TODO no such object error
+	//					panic("no such dingus, dingus")
+	//				}
 
-					// TODO lock object
+	//				// TODO lock object
 
-					editor := "/usr/bin/vim"
-					if v := os.Getenv("VISUAL"); v != "" {
-						editor = v
-					} else if e := os.Getenv("EDITOR"); e != "" {
-						editor = e
-					}
+	//				editor := "/usr/bin/vim"
+	//				if v := os.Getenv("VISUAL"); v != "" {
+	//					editor = v
+	//				} else if e := os.Getenv("EDITOR"); e != "" {
+	//					editor = e
+	//				}
 
-					f, err := os.CreateTemp("", fmt.Sprintf("hermeticum-%s-*.lua", o.GetName()))
-					if err != nil {
-						// TODO
-						panic(err)
-					}
-					// TODO as expected, this fails catastrophically.
-					// TODO I'm considering switching to bubbletea, anyway. so i might give
-					// up on external editors for now and just use their multi line editing
-					// thing.
-					cmd := exec.Command(editor, f.Name())
-					cmd.Stdin = os.Stdin
-					cmd.Stdout = os.Stdout
-					err = cmd.Run()
-					if err != nil {
-						// TODO
-						panic(err)
-					}
+	//				f, err := os.CreateTemp("", fmt.Sprintf("hermeticum-%s-*.lua", o.GetName()))
+	//				if err != nil {
+	//					// TODO
+	//					panic(err)
+	//				}
+	//				// TODO as expected, this fails catastrophically.
+	//				// TODO I'm considering switching to bubbletea, anyway. so i might give
+	//				// up on external editors for now and just use their multi line editing
+	//				// thing.
+	//				cmd := exec.Command(editor, f.Name())
+	//				cmd.Stdin = os.Stdin
+	//				cmd.Stdout = os.Stdout
+	//				err = cmd.Run()
+	//				if err != nil {
+	//					// TODO
+	//					panic(err)
+	//				}
 
-					newContent, err := io.ReadAll(f)
-					if err != nil {
-						// TODO
-						panic(err)
-					}
-					f.Close()
+	//				newContent, err := io.ReadAll(f)
+	//				if err != nil {
+	//					// TODO
+	//					panic(err)
+	//				}
+	//				f.Close()
 
-					cs.logger.Println(newContent)
+	//				cs.logger.Println(newContent)
 
-					// TODO update object
+	//				// TODO update object
 
-					// TODO unlock object
+	//				// TODO unlock object
 
-				}
-			case err := <-cio.errs:
-				log.Printf("error: %s", err.Error())
-			case <-cio.done:
-				// TODO this triggers data race warning when run with -race
-				//cs.App.Stop() // TODO should this be in a defer
-				//return nil
-			}
-		}
-	}()
+	//			}
+	//		case err := <-cio.errs:
+	//			log.Printf("error: %s", err.Error())
+	//		case <-cio.done:
+	//			// TODO this triggers data race warning when run with -race
+	//			//cs.App.Stop() // TODO should this be in a defer
+	//			//return nil
+	//		}
+	//	}
+	//}()
 
 	p := tea.NewProgram(initialModel())
 	_, err = p.Run()
