@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"strings"
 	"text/template"
 	"time"
@@ -19,6 +18,9 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
+
+type ConnectOpts struct {
+}
 
 type model struct {
 	prompt   textarea.Model
@@ -230,18 +232,6 @@ func (m model) View() string {
 		promptStyle.Render(m.prompt.View()))
 }
 
-type ConnectOpts struct {
-}
-
-type ClientState struct {
-	Client       proto.GameWorldClient
-	MaxMessages  int
-	events       []*proto.WorldEvent
-	currentRoom  *proto.Object
-	roomContents []*proto.Object
-	logger       *log.Logger
-}
-
 const detailsTmpl = `{{.Room.Name}}
 {{.Room.Description}}
 
@@ -253,23 +243,6 @@ const detailsTmpl = `{{.Room.Name}}
 {{end -}}
 {{end}}
 `
-
-func (cs *ClientState) handleStateUpdate(ev *proto.WorldEvent) {
-	dt, err := template.New("details").Parse(detailsTmpl)
-	if err != nil {
-		panic(err)
-	}
-
-	update := bytes.NewBufferString("")
-	err = dt.Execute(update, ev)
-	if err != nil {
-		cs.logger.Printf("failed to render details template: %s", err.Error())
-	}
-	cs.roomContents = ev.GetObjects()
-	//cs.App.QueueUpdateDraw(func() {
-	//	cs.details.SetText(update.String())
-	//})
-}
 
 func Connect(opts ConnectOpts) error {
 	p := tea.NewProgram(initialModel(), tea.WithAltScreen())
