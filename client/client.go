@@ -219,8 +219,11 @@ if len(os.Getenv("DEBUG")) > 0 {
 */
 
 func (m model) View() string {
+	stateStyle := lipgloss.NewStyle().
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("63"))
 	return lipgloss.JoinVertical(lipgloss.Left,
-		lipgloss.JoinHorizontal(lipgloss.Top, m.messages.View(), m.state.View()),
+		lipgloss.JoinHorizontal(lipgloss.Top, m.messages.View(), stateStyle.Render(m.state.View())),
 		m.prompt.View())
 }
 
@@ -266,6 +269,9 @@ func (cs *ClientState) handleStateUpdate(ev *proto.WorldEvent) {
 }
 
 func Connect(opts ConnectOpts) error {
+	p := tea.NewProgram(initialModel(), tea.WithAltScreen())
+	_, err := p.Run()
+	return err
 	//			if cmd.Verb == "edit" {
 	//				var o *proto.Object
 	//				id, err := strconv.Atoi(cmd.Rest)
@@ -329,10 +335,6 @@ func Connect(opts ConnectOpts) error {
 	//				// TODO unlock object
 
 	//			}
-
-	p := tea.NewProgram(initialModel(), tea.WithAltScreen())
-	_, err := p.Run()
-	return err
 }
 
 func resolveObjectByString(objs []*proto.Object, s string) []*proto.Object {
