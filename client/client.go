@@ -25,46 +25,49 @@ type model struct {
 	events   []*proto.WorldEvent
 	room     *proto.Object
 	contents []*proto.Object
-	viewport viewport.Model
+	messages viewport.Model
+	state    viewport.Model
 	stream   grpc.BidiStreamingClient[proto.Command, proto.WorldEvent]
-	cio      *clientIO
-	ctx      context.Context
-	err      error
+
+	inbound chan *proto.WorldEvent
+	ctx     context.Context
+	err     error
 }
 
 func initialModel() model {
 	prompt := textarea.New()
 	prompt.Focus()
 	prompt.Prompt = "> "
-	prompt.SetWidth(80)
+	prompt.SetWidth(100)
 	prompt.SetHeight(1)
 	prompt.FocusedStyle.CursorLine = lipgloss.NewStyle()
 
 	prompt.ShowLineNumbers = false
 
-	vp := viewport.New(80, 30)
+	mvp := viewport.New(20, 30)
+
 	prompt.KeyMap.InsertNewline.SetEnabled(false)
-	cio := &clientIO{
-		inbound:  make(chan *proto.WorldEvent),
-		outbound: make(chan *proto.Command),
-	}
+	inbound := make(chan *proto.WorldEvent)
+
+	svp := viewport.New(20, 30)
 
 	ctx := context.Background()
 
 	return model{
 		prompt:   prompt,
-		viewport: vp,
+		messages: mvp,
+		state:    svp,
 		events:   []*proto.WorldEvent{},
 		room:     nil,
 		contents: []*proto.Object{},
-		cio:      cio,
+		inbound:  inbound,
 		ctx:      ctx,
 	}
 }
 
 func (m model) listen() tea.Cmd {
 	return func() tea.Msg {
-		return <-m.cio.inbound
+		return <-m.inbound
 	}
 }
 
@@ -97,7 +100,7 @@ func (m model) connect() tea.Msg {
 				}
 				break
 			} else {
-				m.cio.inbound <- ev
+				m.inbound <- ev
 			}
 		}
 	}()
@@ -132,15 +135,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				vpContent += "\n"
 			}
 
-			m.viewport.SetContent(vpContent)
-			m.viewport.GotoBottom()
+			m.messages.SetContent(vpContent)
+			m.messages.GotoBottom()
 		} else {
-			// TODO update model once i have it (handleStateUpdate)
 			m.contents = msg.GetObjects()
+
+			// TODO precompile this
+			dt, err := template.New("details").Parse(detailsTmpl)
+			if err != nil {
+				panic(err)
+			}
+
+			update := bytes.NewBufferString("")
+			err = dt.Execute(update, msg)
+			if err != nil {
+				m.err = err
+			} else {
+				m.state.SetContent(update.String())
+			}
 		}
 		return m, m.listen()
 	case tea.WindowSizeMsg:
-		m.viewport.Width = msg.Width
+		m.messages.Width = (msg.Width / 3) * 2
+		m.state.Width = msg.Width / 3
 		m.prompt.SetWidth(msg.Width)
 		return m, nil
 	case error:
@@ -189,12 +206,22 @@ func (m model) processInput(value string) tea.Cmd {
 	}
 }
 
+/* TODO
+
+if len(os.Getenv("DEBUG")) > 0 {
+	f, err := tea.LogToFile("debug.log", "debug")
+	if err != nil {
+		fmt.Println("fatal:", err)
+		os.Exit(1)
+	}
+	defer f.Close()
+}
+*/
+
 func (m model) View() string {
-	return fmt.Sprintf(
-		"%s\n\n%s",
-		m.viewport.View(),
-		m.prompt.View(),
-	) + "\n\n"
+	return lipgloss.JoinVertical(lipgloss.Left,
+		lipgloss.JoinHorizontal(lipgloss.Top, m.messages.View(), m.state.View()),
+		m.prompt.View())
 }
 
 type ConnectOpts struct {
@@ -204,7 +231,6 @@ type ClientState struct {
 	Client       proto.GameWorldClient
 	MaxMessages  int
 	events       []*proto.WorldEvent
-	cio          *clientIO
 	currentRoom  *proto.Object
 	roomContents []*proto.Object
 	logger       *log.Logger
@@ -237,11 +263,6 @@ func (cs *ClientState) handleStateUpdate(ev *proto.WorldEvent) {
 	//cs.App.QueueUpdateDraw(func() {
 	//	cs.details.SetText(update.String())
 	//})
-}
-
-type clientIO struct {
-	inbound  chan *proto.WorldEvent
-	outbound chan *proto.Command
 }
 
 func Connect(opts ConnectOpts) error {
