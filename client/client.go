@@ -14,7 +14,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	lg "github.com/charmbracelet/lipgloss"
 	"github.com/vilmibm/hermeticum/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -40,7 +40,7 @@ func initialModel() model {
 	prompt.Prompt = "> "
 	prompt.SetWidth(100)
 	prompt.SetHeight(1)
-	prompt.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	prompt.FocusedStyle.CursorLine = lg.NewStyle()
 
 	prompt.ShowLineNumbers = false
 
@@ -158,7 +158,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.messages.Width = (msg.Width / 3) * 2
 		m.state.Width = msg.Width / 3
-		m.prompt.SetWidth(msg.Width)
+		m.prompt.SetWidth(msg.Width - 2)
 		return m, nil
 	case error:
 		// TODO
@@ -219,12 +219,15 @@ if len(os.Getenv("DEBUG")) > 0 {
 */
 
 func (m model) View() string {
-	stateStyle := lipgloss.NewStyle().
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("63"))
-	return lipgloss.JoinVertical(lipgloss.Left,
-		lipgloss.JoinHorizontal(lipgloss.Top, m.messages.View(), stateStyle.Render(m.state.View())),
-		m.prompt.View())
+	stateStyle := lg.NewStyle().
+		BorderStyle(lg.NormalBorder()).
+		BorderForeground(lg.Color("63"))
+	promptStyle := lg.NewStyle().
+		BorderStyle(lg.NormalBorder()).
+		BorderForeground(lg.Color("63"))
+	return lg.JoinVertical(lg.Left,
+		lg.JoinHorizontal(lg.Top, m.messages.View(), stateStyle.Render(m.state.View())),
+		promptStyle.Render(m.prompt.View()))
 }
 
 type ConnectOpts struct {
