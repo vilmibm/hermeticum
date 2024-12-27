@@ -23,13 +23,15 @@ type ConnectOpts struct {
 }
 
 type model struct {
-	prompt   textarea.Model
-	events   []*proto.WorldEvent
-	room     *proto.Object
-	contents []*proto.Object
-	messages viewport.Model
-	state    viewport.Model
-	stream   grpc.BidiStreamingClient[proto.Command, proto.WorldEvent]
+	editor    string
+	prompt    textarea.Model
+	events    []*proto.WorldEvent // TODO needed?
+	outputLog []string
+	room      *proto.Object
+	contents  []*proto.Object
+	messages  viewport.Model
+	state     viewport.Model
+	stream    grpc.BidiStreamingClient[proto.Command, proto.WorldEvent]
 
 	inbound chan *proto.WorldEvent
 	ctx     context.Context
@@ -55,15 +57,24 @@ func initialModel() model {
 
 	ctx := context.Background()
 
+	editor := "/usr/bin/vim"
+	if v := os.Getenv("VISUAL"); v != "" {
+		editor = v
+	} else if e := os.Getenv("EDITOR"); e != "" {
+		editor = e
+	}
+
 	return model{
-		prompt:   prompt,
-		messages: mvp,
-		state:    svp,
-		events:   []*proto.WorldEvent{},
-		room:     nil,
-		contents: []*proto.Object{},
-		inbound:  inbound,
-		ctx:      ctx,
+		editor:    editor,
+		prompt:    prompt,
+		messages:  mvp,
+		state:     svp,
+		events:    []*proto.WorldEvent{}, // TODO do i need this
+		outputLog: []string{},
+		room:      nil,
+		contents:  []*proto.Object{},
+		inbound:   inbound,
+		ctx:       ctx,
 	}
 }
 
@@ -114,32 +125,22 @@ func (m model) Init() tea.Cmd {
 	return tea.Batch(textarea.Blink, m.connect, m.listen())
 }
 
+type show string
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case grpc.BidiStreamingClient[proto.Command, proto.WorldEvent]:
 		m.stream = msg
 		return m, nil
+	case show:
+		m.outputLog = append(m.outputLog, string(msg))
+		vpContent := strings.Join(m.outputLog, "\n")
+		vpContent += "\n"
+		m.messages.SetContent(vpContent)
+		m.messages.GotoBottom()
+		return m, nil
 	case *proto.WorldEvent:
-		if msg.Type != proto.WorldEvent_STATE {
-			m.events = append(m.events, msg)
-			vpContent := ""
-			for _, e := range m.events {
-				switch e.Type {
-				case proto.WorldEvent_OVERHEARD:
-					vpContent += fmt.Sprintf("%s: %s", e.GetSource(), e.GetText())
-				case proto.WorldEvent_EMOTE:
-					vpContent += fmt.Sprintf("%s %s", e.GetSource(), e.GetText())
-				case proto.WorldEvent_PRINT:
-					vpContent += fmt.Sprintf("%s", e.GetText())
-				default:
-					vpContent += fmt.Sprintf("%#v", e)
-				}
-				vpContent += "\n"
-			}
-
-			m.messages.SetContent(vpContent)
-			m.messages.GotoBottom()
-		} else {
+		if msg.Type == proto.WorldEvent_STATE {
 			m.contents = msg.GetObjects()
 
 			// TODO precompile this
@@ -155,8 +156,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.state.SetContent(update.String())
 			}
+			return m, m.listen()
 		}
-		return m, m.listen()
+
+		m.events = append(m.events, msg)
+		var toShow show
+		switch msg.Type {
+		case proto.WorldEvent_OVERHEARD:
+			toShow = show(fmt.Sprintf("%s: %s", msg.GetSource(), msg.GetText()))
+		case proto.WorldEvent_EMOTE:
+			toShow = show(fmt.Sprintf("%s %s", msg.GetSource(), msg.GetText()))
+		case proto.WorldEvent_PRINT:
+			toShow = show(fmt.Sprintf("%s", msg.GetText()))
+		default:
+			toShow = show(fmt.Sprintf("%#v", msg))
+		}
+
+		return m, tea.Batch(func() tea.Msg { return toShow }, m.listen())
 	case tea.WindowSizeMsg:
 		m.messages.Width = (msg.Width / 3) * 2
 		m.state.Width = msg.Width / 3
@@ -186,25 +202,96 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.prompt, cmd = m.prompt.Update(msg)
 		return m, cmd
+	case editorFinishedMsg:
+		if msg.err != nil {
+			return m, errMsg(msg.err)
+		}
+		newScript, err := io.ReadAll(msg.f)
+		if err != nil {
+			return m, errMsg(err)
+		}
+		msg.f.Close()
+		sCmd := &proto.Command{
+			Verb: "update",
+			Rest: fmt.Sprintf("%d %s",
+				msg.obj.Id,
+				newScript,
+			),
+		}
+		// TODO cmd to unlock object
+		return m, func() tea.Msg { return m.stream.Send(sCmd) }
 	default:
 		return m, nil
 	}
 }
 
-func (m model) processInput(value string) tea.Cmd {
+func errMsg(err error) func() tea.Msg {
 	return func() tea.Msg {
-		var verb string
-		rest := value
-		if strings.HasPrefix(value, "/") {
-			verb, rest, _ = strings.Cut(value[1:], " ")
-		} else {
-			verb = "say"
+		return show("error: " + err.Error())
+	}
+}
+
+type editorFinishedMsg struct {
+	err error
+	obj *proto.Object
+	f   *os.File
+}
+
+func (m model) processInput(value string) tea.Cmd {
+	// TODO lol clean this up it's hideous
+	var verb string
+	rest := value
+	if strings.HasPrefix(value, "/") {
+		verb, rest, _ = strings.Cut(value[1:], " ")
+	} else {
+		verb = "say"
+	}
+
+	if verb == "edit" {
+		var o *proto.Object
+		id, err := strconv.Atoi(rest)
+		if err == nil {
+			o = resolveObjectById(m.contents, id)
 		}
-		cmd := &proto.Command{
-			Verb: verb,
-			Rest: rest,
+
+		if o == nil {
+			matches := resolveObjectByString(m.contents, rest)
+			if len(matches) == 1 {
+				o = matches[0]
+			} else if len(matches) > 1 {
+				// TODO fancier error
+				return func() tea.Msg { return show("error: non unique item") }
+			}
 		}
-		return m.stream.Send(cmd)
+
+		if o == nil {
+			return func() tea.Msg { return show("error: no such object in sight...") }
+		}
+
+		// TODO lock object
+
+		f, err := os.CreateTemp("", fmt.Sprintf("hermeticum-%s-*.lua", o.GetName()))
+		if err != nil {
+			return func() tea.Msg { return show("error: couldn't create temp file for editing") }
+		}
+		f.WriteString(o.GetScript())
+		cmd := exec.Command(m.editor, f.Name())
+		return tea.ExecProcess(cmd, func(err error) tea.Msg {
+			return editorFinishedMsg{err, o, f}
+		})
+	}
+
+	return func() tea.Msg {
+		switch verb {
+		case "quit", "q":
+			return tea.Quit()
+		default:
+			cmd := &proto.Command{
+				Verb: verb,
+				Rest: rest,
+			}
+			return m.stream.Send(cmd)
+		}
 	}
 }
 
@@ -248,69 +335,6 @@ func Connect(opts ConnectOpts) error {
 	p := tea.NewProgram(initialModel(), tea.WithAltScreen())
 	_, err := p.Run()
 	return err
-	//			if cmd.Verb == "edit" {
-	//				var o *proto.Object
-	//				id, err := strconv.Atoi(cmd.Rest)
-	//				if err == nil {
-	//					o = resolveObjectById(cs.roomContents, id)
-	//				}
-
-	//				if o == nil {
-	//					matches := resolveObjectByString(cs.roomContents, cmd.Rest)
-	//					if len(matches) == 1 {
-	//						o = matches[0]
-	//					} else if len(matches) > 1 {
-	//						// TODO fuzzy error
-	//						panic("non unique item")
-	//					}
-	//				}
-
-	//				if o == nil {
-	//					// TODO no such object error
-	//					panic("no such dingus, dingus")
-	//				}
-
-	//				// TODO lock object
-
-	//				editor := "/usr/bin/vim"
-	//				if v := os.Getenv("VISUAL"); v != "" {
-	//					editor = v
-	//				} else if e := os.Getenv("EDITOR"); e != "" {
-	//					editor = e
-	//				}
-
-	//				f, err := os.CreateTemp("", fmt.Sprintf("hermeticum-%s-*.lua", o.GetName()))
-	//				if err != nil {
-	//					// TODO
-	//					panic(err)
-	//				}
-	//				// TODO as expected, this fails catastrophically.
-	//				// TODO I'm considering switching to bubbletea, anyway. so i might give
-	//				// up on external editors for now and just use their multi line editing
-	//				// thing.
-	//				cmd := exec.Command(editor, f.Name())
-	//				cmd.Stdin = os.Stdin
-	//				cmd.Stdout = os.Stdout
-	//				err = cmd.Run()
-	//				if err != nil {
-	//					// TODO
-	//					panic(err)
-	//				}
-
-	//				newContent, err := io.ReadAll(f)
-	//				if err != nil {
-	//					// TODO
-	//					panic(err)
-	//				}
-	//				f.Close()
-
-	//				cs.logger.Println(newContent)
-
-	//				// TODO update object
-
-	//				// TODO unlock object
-
-	//			}
 }
 
 func resolveObjectByString(objs []*proto.Object, s string) []*proto.Object {
