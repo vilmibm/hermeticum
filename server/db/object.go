@@ -5,14 +5,15 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 type Perm string
 
 const (
-	PermWorld  Perm = "world"
-	PermOwner  Perm = "owner"
-	baseScript      = ""
+	PermWorld Perm = "world"
+	PermOwner Perm = "owner"
 )
 
 type Object struct {
@@ -23,7 +24,7 @@ type Object struct {
 	OwnerID int
 	Perms   *Permissions
 	script  string
-	Data    map[string]string
+	Data    map[string]interface{}
 }
 
 type Permissions struct {
@@ -33,16 +34,36 @@ type Permissions struct {
 	Exec  Perm
 }
 
+/*
+types. i had parallel thoughts: all map data is strings and objects can have numbers, too. those are incompatible. i don't remember what i did in tildemush for this.
+
+the ideal user experience is that types "just work." so something like this:
+
+--[[WITCH
+data:
+
+	foo: 1
+	bar: "hi"
+
+--[[HCTIW
+
+hears(".*", function()
+
+	set("foo", get("foo") + 1)
+	say(my("bar"))
+
+end)
+
+but as it stands right now, that wouldn't work.
+*/
 func NewObject(owneruid uint32) *Object {
 	o := &Object{
 		OwnerID: int(owneruid),
-		Data:    map[string]string{},
+		Data:    map[string]interface{}{},
 	}
 
 	o.SetData("name", "plain orb")
 	o.SetData("description", "a smooth, dull, grey orb about the size of an eyeball.")
-
-	o.SetScript(baseScript)
 
 	o.Perms = &Permissions{
 		Read:  PermWorld,
@@ -58,19 +79,20 @@ func NewAvatar(owneruid uint32, username string) *Object {
 	o := NewObject(owneruid)
 
 	o.Perms.Carry = PermOwner
+	o.Perms.Write = PermOwner
 
 	o.SetData("name", username)
 	o.SetData("description",
 		fmt.Sprintf("a gaseous vapor. It smells faintly of %s.", randSmell()))
 
-	o.SetScript(baseScript + `
+	o.script = `
 		hears(".*", function()
 			tellMe(msg)
 		end)
 		
 		sees(".*", function()
 			showMe(msg)
-		end)`)
+		end)`
 
 	o.Avatar = true
 
@@ -103,17 +125,82 @@ func (o *Object) SetData(key string, value string) {
 	o.Data[key] = value
 }
 
-func (o *Object) GetData(key string) string {
+func (o *Object) GetDataString(key string) string {
 	v, ok := o.Data[key]
 	if !ok {
 		return ""
 	}
-	return v
+	return v.(string)
 }
 
-func (o *Object) SetScript(code string) {
-	// TODO use a formatter
-	o.script = strings.TrimSpace(code)
+type parsedScript struct {
+	data  map[string]interface{}
+	perms Permissions
+	code  string
+}
+
+type witchStanza struct {
+	Data        map[string]interface{}
+	Permissions Permissions
+}
+
+func parseScript(code string) (parsedScript, error) {
+	inWitch := false
+	witchYml := ""
+	c := ""
+	for _, l := range strings.Split(code, "\n") {
+		if l == "--HCTIW]]" {
+			inWitch = false
+			continue
+		}
+
+		if inWitch {
+			witchYml += l + "\n"
+			continue
+		}
+
+		if l == "--[[WITCH" {
+			inWitch = true
+			continue
+		}
+
+		c += l + "\n"
+	}
+	// TODO detect if still in witch stanza, error
+	// TODO detect if did not find stanza
+
+	fmt.Println("*************")
+	fmt.Println(witchYml)
+	fmt.Println("*************")
+	fmt.Println(c)
+	fmt.Println("*************")
+
+	ws := &witchStanza{}
+	err := yaml.Unmarshal([]byte(witchYml), ws)
+	if err != nil {
+		return parsedScript{}, fmt.Errorf("could not understand witch stanza: %w", err)
+	}
+
+	newData := ws.Data
+	newPerms := ws.Permissions
+	return parsedScript{
+		data:  newData,
+		perms: newPerms,
+		code:  c,
+	}, nil
+}
+
+func (o *Object) SetScript(code string) error {
+	ps, err := parseScript(code)
+	if err != nil {
+		return err
+	}
+
+	o.Data = ps.data
+	o.Perms = &ps.perms
+	o.script = strings.TrimSpace(ps.code)
+
+	return nil
 }
 
 func (o *Object) AppendScript(code string) {
@@ -121,34 +208,52 @@ func (o *Object) AppendScript(code string) {
 }
 
 func (o *Object) GetScript() string {
-	return fmt.Sprintf(`
-		%s
-		%s
-		%s
-	`, o.hasInvocation(), o.allowsInvocation(), o.script)
+	return fmt.Sprintf(`%s
+%s`, o.generateWitchStanza(), o.script)
 }
 
-func (o *Object) hasInvocation() string {
-	hi := "has({\n"
-	for k, v := range o.Data {
-		hi += fmt.Sprintf(`  %s = "%s",`, k, v) + "\n"
+func (o *Object) generateWitchStanza() string {
+	ws := witchStanza{
+		Data:        o.Data,
+		Permissions: *o.Perms,
 	}
-	hi += "})"
+	encoded, err := yaml.Marshal(ws)
+	if err != nil {
+		panic("corrupt yaml made it into the database -_- " + err.Error())
+	}
 
-	return hi
+	return fmt.Sprintf("--[[WITCH\n%s--HCTIW]]\n\n", encoded)
 }
 
-func (o *Object) allowsInvocation() string {
-	return fmt.Sprintf(`
-allows({
-	read = "%s",
-	write = "%s",
-	carry = "%s",
-	execute = "%s",
-})`, o.Perms.Read, o.Perms.Write, o.Perms.Carry, o.Perms.Exec)
+func (o *Object) Update(db *DB) error {
+	ctx := context.Background()
+	tx, err := db.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	stmt := `
+		UPDATE objects SET script = $2, data = $3 WHERE id = $1`
+
+	_, err = tx.Exec(ctx, stmt, o.ID, o.script, o.Data)
+	if err != nil {
+		return err
+	}
+
+	stmt = `
+		UPDATE permissions SET read = $2, write = $3, carry = $4, exec = $5
+		WHERE object = $1`
+
+	_, err = tx.Exec(ctx, stmt, o.ID,
+		o.Perms.Read, o.Perms.Write, o.Perms.Carry, o.Perms.Exec)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
 }
 
-func (o *Object) Save(db *DB) error {
+func (o *Object) Create(db *DB) error {
 	ctx := context.Background()
 	tx, err := db.pool.Begin(ctx)
 	if err != nil {
@@ -160,7 +265,7 @@ func (o *Object) Save(db *DB) error {
 		INSERT INTO objects (avatar, bedroom, data, script, owneruid)
 		VALUES ( $1, $2, $3, $4, $5)
 		RETURNING id`
-	err = db.pool.QueryRow(ctx, stmt,
+	err = tx.QueryRow(ctx, stmt,
 		o.Avatar, o.Bedroom, o.Data, o.script, o.OwnerID).Scan(
 		&o.ID)
 	if err != nil {
@@ -253,7 +358,7 @@ func Filter(os []*Object, term string) []*Object {
 		}
 	} else {
 		for _, o := range os {
-			if strings.Contains(o.Data["name"], term) {
+			if strings.Contains(o.GetDataString("name"), term) {
 				out = append(out, o)
 			}
 		}
@@ -311,11 +416,15 @@ func (o *Object) Contents(db *DB) ([]*Object, error) {
 }
 
 func (o *Object) String() string {
-	return fmt.Sprintf("%s (%d)", o.GetData("name"), o.ID)
+	return fmt.Sprintf("%s (%d)", o.GetDataString("name"), o.ID)
+}
+
+func (o *Object) HasSameOwner(other Object) bool {
+	return o.OwnerID == other.OwnerID
 }
 
 func (o *Object) Can(perm string, other Object) bool {
-	if other.OwnerID == o.ID {
+	if o.HasSameOwner(other) {
 		return true
 	}
 

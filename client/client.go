@@ -5,6 +5,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"os/exec"
+	"strconv"
 	"strings"
 	"text/template"
 	"time"
@@ -89,7 +92,7 @@ func (m model) connect() tea.Msg {
 		"unix:///tmp/hermeticum.sock",
 		grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		return tea.Quit
+		panic(err.Error()) // TODO
 	}
 
 	client := proto.NewGameWorldClient(gc)
@@ -97,7 +100,8 @@ func (m model) connect() tea.Msg {
 	now := fmt.Sprintf("%d", time.Now().Unix())
 	if _, err = client.Ping(
 		m.ctx, &proto.PingMsg{When: now}); err != nil {
-		return tea.Quit
+		// TODO
+		panic(err.Error())
 	}
 
 	stream, err := client.ClientInput(m.ctx)
@@ -109,7 +113,8 @@ func (m model) connect() tea.Msg {
 		for {
 			if ev, err := stream.Recv(); err != nil {
 				if err != io.EOF {
-					m.err = err
+					// TODO add server error to inbound?
+					m.err = err // TODO what was i going to do with m.err
 				}
 				break
 			} else {
@@ -128,6 +133,9 @@ func (m model) Init() tea.Cmd {
 type show string
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.err != nil {
+		return m, func() tea.Msg { return show(fmt.Sprintf("shit: %s", m.err.Error())) }
+	}
 	switch msg := msg.(type) {
 	case grpc.BidiStreamingClient[proto.Command, proto.WorldEvent]:
 		m.stream = msg
@@ -180,7 +188,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case error:
 		// TODO
-		panic(msg)
+		panic("what" + msg.Error())
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c":
@@ -206,6 +214,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			return m, errMsg(msg.err)
 		}
+		msg.f.Seek(0, 0)
 		newScript, err := io.ReadAll(msg.f)
 		if err != nil {
 			return m, errMsg(err)
@@ -215,7 +224,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Verb: "update",
 			Rest: fmt.Sprintf("%d %s",
 				msg.obj.Id,
-				newScript,
+				string(newScript),
 			),
 		}
 		// TODO cmd to unlock object

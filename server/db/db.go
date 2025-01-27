@@ -99,13 +99,22 @@ func (db *DB) Ensure() error {
 
 	rootuid := uint32(uid)
 
+	rootAv, err := db.ObjectByOwnerName(rootuid, "root")
+	if err != nil {
+		rootAv = NewAvatar(rootuid, "root")
+		err = rootAv.Create(db)
+		if err != nil {
+			return err
+		}
+	}
+
 	foyer, err := db.ObjectByOwnerName(rootuid, "foyer")
 	if err != nil {
 		// TODO actually check error. for now assuming it means does not exist
 		foyer = NewRoom(rootuid)
 		foyer.SetData("name", "foyer")
 		foyer.SetData("description", "a big room. the ceiling is painted with constellations")
-		if err = foyer.Save(db); err != nil {
+		if err = foyer.Create(db); err != nil {
 			return err
 		}
 	}
@@ -117,7 +126,7 @@ func (db *DB) Ensure() error {
 		egg.SetData("name", "floor egg")
 		egg.SetData("description", "it's an egg and it's on the floor")
 		egg.Perms.Carry = PermOwner
-		if err = egg.Save(db); err != nil {
+		if err = egg.Create(db); err != nil {
 			return err
 		}
 	}
@@ -128,7 +137,7 @@ func (db *DB) Ensure() error {
 		pub = NewRoom(rootuid)
 		pub.SetData("name", "pub")
 		pub.SetData("description", "a warm, cozy pub constructed of hard wood and brass")
-		if err = pub.Save(db); err != nil {
+		if err = pub.Create(db); err != nil {
 			return err
 		}
 	}
@@ -141,7 +150,7 @@ func (db *DB) Ensure() error {
 		oakDoor.SetData("description", "a heavy oak door with a brass handle. an ornate sign says PUB.")
 		oakDoor.AppendScript(fmt.Sprintf("goes(north, %d)", pub.ID))
 		oakDoor.Perms.Carry = PermOwner
-		if err = oakDoor.Save(db); err != nil {
+		if err = oakDoor.Create(db); err != nil {
 			return err
 		}
 	}
@@ -154,7 +163,7 @@ func (db *DB) Ensure() error {
 		revOakDoor.SetData("description", "a heavy oak door with a brass handle. an ornate sign says EXIT.")
 		revOakDoor.AppendScript(fmt.Sprintf("goes(south, %d)", foyer.ID))
 		revOakDoor.Perms.Carry = PermOwner
-		if err = revOakDoor.Save(db); err != nil {
+		if err = revOakDoor.Create(db); err != nil {
 			return err
 		}
 	}
@@ -174,12 +183,12 @@ func (db *DB) GreateAvatar(uid uint32, name string) (av *Object, err error) {
 	}
 
 	av = NewAvatar(uid, name)
-	if err = av.Save(db); err != nil {
+	if err = av.Create(db); err != nil {
 		return
 	}
 
 	br := NewBedroom(uid, name)
-	if err = br.Save(db); err != nil {
+	if err = br.Create(db); err != nil {
 		return
 	}
 
@@ -286,7 +295,7 @@ func (db *DB) Resolve(vantage Object, term string) ([]Object, error) {
 	out := []Object{}
 
 	for _, o := range stuff {
-		if strings.Contains(o.Data["name"], term) {
+		if strings.Contains(o.GetDataString("name"), term) {
 			out = append(out, *o)
 		}
 	}

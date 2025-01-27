@@ -91,8 +91,6 @@ func (sc *ScriptContext) initLua(obj db.Object) error {
 	l.SetGlobal("down", lua.LString(dirBelow))
 
 	// witch object behavior functions
-	l.SetGlobal("allows", l.NewFunction(sc.wAllows))
-	l.SetGlobal("has", l.NewFunction(sc.wHas))
 	l.SetGlobal("hears", l.NewFunction(sc.wHears))
 	l.SetGlobal("sees", l.NewFunction(sc.wSees))
 	l.SetGlobal("goes", l.NewFunction(sc.wGoes))
@@ -116,6 +114,7 @@ func (sc *ScriptContext) Run() {
 			}
 			if vc.Receiver.GetScript() != sc.script {
 				if err := sc.initLua(vc.Receiver); err != nil {
+					// TODO tell user about failure!
 					log.Printf("error parsing script %s: %s",
 						vc.Receiver.GetScript(), err.Error())
 				} else {
@@ -127,6 +126,8 @@ func (sc *ScriptContext) Run() {
 			if l == nil {
 				continue
 			}
+
+			sc.obj = vc.Receiver
 
 			// witch action functions relative to calling context
 
@@ -143,7 +144,7 @@ func (sc *ScriptContext) Run() {
 				sender := l.GetGlobal("sender").(*lua.LTable)
 				senderID := int(lua.LVAsNumber(sender.RawGetString("ID")))
 
-				log.Printf("tellMe: %d %s", senderID, l.ToString(1))
+				log.Printf("tellSender: %d %s", senderID, l.ToString(1))
 				sc.server.Tell(vc.Receiver.ID, senderID, l.ToString(1))
 				return 0
 			}))
@@ -190,7 +191,7 @@ func (sc *ScriptContext) Run() {
 			//log.Printf("%#v", vc)
 
 			senderT := l.NewTable()
-			senderT.RawSetString("name", lua.LString(vc.Sender.Data["name"]))
+			senderT.RawSetString("name", lua.LString(vc.Sender.GetDataString("name")))
 			senderT.RawSetString("ID", lua.LNumber(vc.Sender.ID))
 			l.SetGlobal("sender", senderT)
 			l.SetGlobal("msg", lua.LString(vc.Rest))
@@ -241,22 +242,10 @@ func (sc *ScriptContext) addHandler(l *lua.LState, verb, pattern string, cb *lua
 }
 
 func (sc *ScriptContext) wMy(l *lua.LState) int {
-	hasT := l.GetGlobal("_has").(*lua.LTable)
-	val := hasT.RawGetString(l.ToString(1))
-	l.Push(val)
+	val := sc.obj.GetDataString(l.ToString(1))
+	lval := lua.LString(val)
+	l.Push(lval)
 	return 1
-}
-
-func (sc *ScriptContext) wAllows(l *lua.LState) int {
-	l.SetGlobal("_allows", l.ToTable(1))
-	// TODO
-	return 0
-}
-
-func (sc *ScriptContext) wHas(l *lua.LState) int {
-	l.SetGlobal("_has", l.ToTable(1))
-	// TODO
-	return 0
 }
 
 func (sc *ScriptContext) wHears(l *lua.LState) int {
@@ -327,10 +316,10 @@ func (sc *ScriptContext) wGoes(l *lua.LState) int {
 		}
 
 		if normalized.Equals(direction) {
-			log.Printf("MOVING SENDER TO '%s'", targetRoom.Data["name"])
+			log.Printf("MOVING SENDER TO '%s'", targetRoom.GetDataString("name"))
 			// TODO error checking
 			sender.MoveInto(sc.db, *targetRoom)
-			sc.server.Tell(targetRoom.ID, sender.ID, fmt.Sprintf("you are now in %s", targetRoom.Data["name"]))
+			sc.server.Tell(targetRoom.ID, sender.ID, fmt.Sprintf("you are now in %s", targetRoom.GetDataString("name")))
 			// TODO tell other avatars that person appeared
 		}
 		return

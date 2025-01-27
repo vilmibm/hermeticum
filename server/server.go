@@ -285,8 +285,8 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 			if obj.Avatar {
 				aio, ok := s.sessions[uint32(obj.OwnerID)]
 				if ok {
-					aname, ok := avatar.Data["name"]
-					if !ok {
+					aname := avatar.GetDataString("name")
+					if aname == "" {
 						aname = "amorphous entity"
 					}
 					msg := "slowly fades out of existence"
@@ -331,6 +331,8 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 			switch cmd.Verb {
 			case "look":
 				handler = s.handleLook
+			case "examine":
+				handler = s.handleExamine
 			case "quit":
 				uio.done <- true
 			case "dig":
@@ -343,6 +345,8 @@ func (s *gameWorldServer) ClientInput(stream proto.GameWorld_ClientInputServer) 
 				handler = s.handleDrop
 			case "create":
 				handler = s.handleCreate
+			case "update":
+				handler = s.handleUpdate
 			default:
 				handler = s.handleCmd
 			}
@@ -400,7 +404,7 @@ func (s *gameWorldServer) SendStateUpdate(avatar db.Object) {
 		Id:          uint64(room.ID),
 		Owner:       roomOwner.String(),
 		Name:        room.String(),
-		Description: strings.TrimSpace(room.GetData("description")),
+		Description: strings.TrimSpace(room.GetDataString("description")),
 		Avatar:      false,
 		Script:      roomScript,
 	}
@@ -421,7 +425,7 @@ func (s *gameWorldServer) SendStateUpdate(avatar db.Object) {
 			Id:          uint64(o.ID),
 			Owner:       owner.String(),
 			Name:        o.String(),
-			Description: strings.TrimSpace(o.GetData("description")),
+			Description: strings.TrimSpace(o.GetDataString("description")),
 			Avatar:      o.Avatar,
 			Script:      script,
 		}
@@ -443,7 +447,6 @@ func (s *gameWorldServer) SendStateUpdate(avatar db.Object) {
 
 // TODO handleLock
 // TODO handleUnlock
-// TODO handleUpdateObj
 
 func (s *gameWorldServer) PrintTo(avatar db.Object, msg string) {
 	s.SendTo(avatar, &proto.WorldEvent{
@@ -478,7 +481,7 @@ func (s *gameWorldServer) Show(fromObjID, toObjID int, action string) {
 
 	speakerName := "an ethereal presence"
 	if from.Data["name"] != "" {
-		speakerName = from.Data["name"]
+		speakerName = from.GetDataString("name")
 	}
 
 	ev := proto.WorldEvent{
@@ -512,7 +515,7 @@ func (s *gameWorldServer) Tell(fromObjID, toObjID int, msg string) {
 
 	speakerName := "an ethereal presence"
 	if from.Data["name"] != "" {
-		speakerName = from.Data["name"]
+		speakerName = from.GetDataString("name")
 	}
 
 	ev := proto.WorldEvent{
@@ -576,26 +579,21 @@ func (s *gameWorldServer) handleDrop(avatar db.Object, cmd *proto.Command) error
 	return nil
 }
 
-func (s *gameWorldServer) handleGet(avatar db.Object, cmd *proto.Command) error {
+func (s *gameWorldServer) resolve(avatar db.Object, cmd *proto.Command) (*db.Object, error) {
 	if cmd.Rest == "" {
-		s.PrintTo(avatar, "get what?")
-		return nil
+		s.PrintTo(avatar, fmt.Sprintf("%s what?", cmd.Verb))
+		return nil, nil
 	}
-	room, err := avatar.Container(s.db)
-	if err != nil {
-		return err
-	}
-
 	eshot, err := avatar.Earshot(s.db)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	os := db.Filter(eshot, cmd.Rest)
 
 	if len(os) == 0 {
 		s.PrintTo(avatar, fmt.Sprintf("You see nothing nearby called '%s'", cmd.Rest))
-		return nil
+		return nil, nil
 	}
 
 	if len(os) > 1 {
@@ -603,10 +601,20 @@ func (s *gameWorldServer) handleGet(avatar db.Object, cmd *proto.Command) error 
 		for _, o := range os {
 			msg += fmt.Sprintf("- %s\n", o.String())
 		}
-		return nil
+		return nil, nil
 	}
 
-	target := os[0]
+	return os[0], nil
+}
+
+func (s *gameWorldServer) handleGet(avatar db.Object, cmd *proto.Command) error {
+	target, err := s.resolve(avatar, cmd)
+	if err != nil {
+		return err
+	}
+	if target == nil {
+		return nil
+	}
 
 	if target.ID == avatar.ID {
 		s.PrintTo(avatar, "You find yourself unable to put yourself into your own pocket.")
@@ -619,6 +627,11 @@ func (s *gameWorldServer) handleGet(avatar db.Object, cmd *proto.Command) error 
 	}
 
 	err = target.MoveInto(s.db, avatar)
+	if err != nil {
+		return err
+	}
+
+	room, err := avatar.Container(s.db)
 	if err != nil {
 		return err
 	}
@@ -638,6 +651,47 @@ func (s *gameWorldServer) handleGet(avatar db.Object, cmd *proto.Command) error 
 	return nil
 }
 
+func (s *gameWorldServer) handleExamine(avatar db.Object, cmd *proto.Command) error {
+	target, err := s.resolve(avatar, cmd)
+	if err != nil || target == nil {
+		return err
+	}
+
+	owner, err := s.db.GetAvatarForUid(uint32(target.OwnerID))
+	if err != nil {
+		return err
+	}
+
+	ownerName := owner.GetDataString("name")
+
+	if ownerName == "" {
+		ownerName = "someone"
+	}
+
+	desc := target.GetDataString("description")
+	if strings.TrimSpace(desc) == "" {
+		desc = "something undefined"
+	}
+	name := target.GetDataString("name")
+	if name == "" {
+		name = "something unnamed"
+	}
+
+	msg := fmt.Sprintf(`
+You stare at %s.
+You sense that it was created by %s.
+
+You see:
+
+%s`, name, ownerName, desc)
+	uid := uint32(avatar.OwnerID)
+	s.sessions[uid].outbound <- &proto.WorldEvent{
+		Type: proto.WorldEvent_PRINT,
+		Text: &msg,
+	}
+	return nil
+}
+
 func (s *gameWorldServer) handleLook(avatar db.Object, cmd *proto.Command) error {
 	uid := uint32(avatar.OwnerID)
 
@@ -650,7 +704,7 @@ func (s *gameWorldServer) handleLook(avatar db.Object, cmd *proto.Command) error
 You are in %s (%d). %s.
 
 You can see:
-`, room.GetData("name"), room.ID, room.GetData("description"))
+`, room.GetDataString("name"), room.ID, room.GetDataString("description"))
 
 	os, err := room.Contents(s.db)
 	if err != nil {
@@ -662,7 +716,7 @@ You can see:
 		if o.ID == avatar.ID {
 			youMsg = " (that's you!)"
 		}
-		msg += fmt.Sprintf("- %s (%d)%s\n", o.GetData("name"), o.ID, youMsg)
+		msg += fmt.Sprintf("- %s (%d)%s\n", o.GetDataString("name"), o.ID, youMsg)
 	}
 
 	inv, err := avatar.Contents(s.db)
@@ -699,7 +753,7 @@ func (s *gameWorldServer) handleInv(avatar db.Object, cmd *proto.Command) error 
 	msg := "You rummage in your pockets and find:"
 
 	for _, o := range os {
-		msg += fmt.Sprintf("\n\t- %s", o.GetData("name"))
+		msg += fmt.Sprintf("\n\t- %s", o.GetDataString("name"))
 	}
 
 	if len(os) == 0 {
@@ -712,7 +766,7 @@ func (s *gameWorldServer) handleInv(avatar db.Object, cmd *proto.Command) error 
 	}
 
 	for _, o := range os {
-		log.Printf("%s heard %s from %d", o.GetData("name"), "look", avatar.ID)
+		log.Printf("%s heard %s from %d", o.GetDataString("name"), "look", avatar.ID)
 		if err = s.verbHandler("look", "", avatar, *o); err != nil {
 			log.Printf("error handling verb %s for object %d: %s", cmd.Verb, o.ID, err)
 		}
@@ -721,12 +775,44 @@ func (s *gameWorldServer) handleInv(avatar db.Object, cmd *proto.Command) error 
 	return nil
 }
 
+func (s *gameWorldServer) handleUpdate(avatar db.Object, cmd *proto.Command) error {
+	parts := strings.SplitN(cmd.Rest, " ", 2)
+	oid, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return err
+	}
+	newScript := parts[1]
+
+	obj, err := s.db.ObjectByID(oid)
+	if err != nil {
+		return err
+	}
+
+	if !avatar.Can("write", *obj) {
+		return fmt.Errorf("illegal write attempt on %d by %d", oid, avatar.OwnerID)
+	}
+
+	obj.SetScript(newScript)
+
+	err = obj.Update(s.db)
+	if err != nil {
+		return err
+	}
+
+	// TODO decide on errors...
+	// - allow failing-to-evaluate script to be saved
+	// - maybe put previous-working version in a comment at bottom
+	// - put error output in a comment
+	// TODO unlock object?
+	return nil
+}
+
 func (s *gameWorldServer) handleCreate(avatar db.Object, cmd *proto.Command) error {
 	uid := uint32(avatar.OwnerID)
 
 	o := db.NewObject(uid)
 
-	err := o.Save(s.db)
+	err := o.Create(s.db)
 	if err != nil {
 		return err
 	}
@@ -759,7 +845,7 @@ func (s *gameWorldServer) handleDig(avatar db.Object, cmd *proto.Command) error 
 	}
 
 	room := db.NewRoom(uid)
-	if err = room.Save(s.db); err != nil {
+	if err = room.Create(s.db); err != nil {
 		return err
 	}
 
@@ -775,7 +861,7 @@ func (s *gameWorldServer) handleDig(avatar db.Object, cmd *proto.Command) error 
 	door.SetData("name", name)
 	door.SetData("description", desc)
 	door.AppendScript(fmt.Sprintf("goes(%s, %d)", heading, room.ID))
-	if err = door.Save(s.db); err != nil {
+	if err = door.Create(s.db); err != nil {
 		return err
 	}
 
@@ -785,7 +871,7 @@ func (s *gameWorldServer) handleDig(avatar db.Object, cmd *proto.Command) error 
 	revDoor.AppendScript(fmt.Sprintf("goes(%s, %d)",
 		dir.Reverse().Human(), currentRoom.ID))
 
-	if err = revDoor.Save(s.db); err != nil {
+	if err = revDoor.Create(s.db); err != nil {
 		return err
 	}
 
