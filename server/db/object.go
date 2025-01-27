@@ -54,7 +54,17 @@ hears(".*", function()
 
 end)
 
-but as it stands right now, that wouldn't work.
+i've hacked things such that this could work if i dynamically figure out types stored in data at run time.
+
+the more i play with editing scripts the less happy i ham with the comment approach and, indeed, the approach of having the data right there in the code.
+
+i might feel better about it if it looked like tildemush again -- (has) etc. s expression parsing just makes me feel less nervous even if conceptually it's just as brittle.
+
+but something to consider is that i'm locking people into editing in the application -- so why not have object editing have UI elements for data and permissions?
+
+i'm using the browser as inspiration and remembering how in the dev console you get code and also a javascript object explorer.
+
+i'm going to ruminate on that.
 */
 func NewObject(owneruid uint32) *Object {
 	o := &Object{
