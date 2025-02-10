@@ -11,8 +11,18 @@ func init() {
 
 var connectCmd = &cobra.Command{
 	Use: "connect",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		opts := client.ConnectOpts{}
-		return client.Connect(opts)
+	Run: func(cmd *cobra.Command, args []string) {
+		state, err := client.New()
+		if err != nil {
+			panic(err)
+		}
+		defer state.Close()
+	loop:
+		for {
+			select {
+			case <-client.Quit:
+				break loop
+			}
+		}
 	},
 }
